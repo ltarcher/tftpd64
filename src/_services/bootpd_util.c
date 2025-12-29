@@ -379,12 +379,14 @@ return TRUE;
 ///////////////////////////////////////////
 //  translation
 ///////////////////////////////////////////
-// translate $IP$ and $MAC$ keywords
-char *TranslateExp (const char *exp, char *to, struct in_addr ip, const char *tMac)
+// translate $IP$, $MAC$, $ARCH$, and $BootFileName$ keywords
+char *TranslateExpEx (const char *exp, char *to, struct in_addr ip, const char *tMac, unsigned char *pDhcpOptions)
 {
 char *q;
 size_t  Ark;
 char sz [256];		// somewhat larger that DHCP_FILE_LEN (128 bytes)
+unsigned short nArchId;
+const char *pszArch;
 
 	// truncate input
 	Ark = strnlen ( to, DHCP_FILE_LEN -1 );  	to [Ark] = 0;
@@ -394,8 +396,76 @@ char sz [256];		// somewhat larger that DHCP_FILE_LEN (128 bytes)
 // LOG (1, "IP <%s>\n", inet_ntoa (ip));
 // LOG (1, "MAC is <%s>\n", haddrtoa (tMac, 6, '.'));
 
-
-    if ( (q=strstr (exp, "$IP$")) != NULL )
+    // Check for $ARCH$ variable - detect client architecture
+    if ( (q=strstr (exp, "$ARCH$")) != NULL )
+    {
+       // Search for DHCP Option 93 (PXE Client Architecture ID)
+       pszArch = "bios";  // Default to BIOS
+       
+       if (pDhcpOptions != NULL)
+       {
+           // Simple search for Option 93
+           // Format: 93 [length] [2 bytes arch id]
+           unsigned char *p = pDhcpOptions + 4; // Skip magic cookie
+           while (*p != DHO_END && p < pDhcpOptions + DHCP_OPTION_LEN - 3)
+           {
+               if (*p == DHO_PAD)
+               {
+                   p++;
+               }
+               else if (*p == DHO_PXE_CLIENT_ARCH_ID && p[1] == 2)
+               {
+                   nArchId = ntohs(*(unsigned short*)(p + 2));
+                   
+                   // Map architecture ID to string
+                   switch (nArchId)
+                   {
+                       case 0x0000:  // Intel x86 PC - Legacy BIOS
+                           pszArch = "bios";
+                           break;
+                       case 0x0006:  // EFI IA32 - UEFI 32-bit
+                           pszArch = "efi32";
+                           break;
+                       case 0x0007:  // EFI BC - UEFI Bytecode (64-bit)
+                           pszArch = "efi64";
+                           break;
+                       case 0x0009:  // EFI Xscale
+                           pszArch = "efi64";
+                           break;
+                       case 0x000a:  // EFI IA64
+                           pszArch = "efi64";
+                           break;
+                       case 0x000b:  // ARM 32-bit
+                           pszArch = "arm";
+                           break;
+                       case 0x000d:  // ARM 64-bit
+                           pszArch = "arm64";
+                           break;
+                       case 0x000e:  // RISC-V 32-bit
+                           pszArch = "riscv32";
+                           break;
+                       case 0x000f:  // RISC-V 64-bit
+                           pszArch = "riscv64";
+                           break;
+                       default:
+                           pszArch = "bios";  // Fallback to BIOS
+                           break;
+                   }
+                   break;
+               }
+               else
+               {
+                   p += 2 + p[1];
+               }
+           }
+       }
+       
+       lstrcpyn (sz, exp, 1 + (int) (q - exp) );
+       lstrcat (sz, pszArch);
+       lstrcat (sz, q + sizeof "$ARCH$" - 1);
+       lstrcpyn (to, sz, DHCP_FILE_LEN - 1);
+    }
+    else if ( (q=strstr (exp, "$IP$")) != NULL )
     {
        lstrcpyn (sz, exp, 1 + (int) (q - exp) );
        lstrcat (sz, inet_ntoa (ip) );
@@ -419,10 +489,16 @@ char sz [256];		// somewhat larger that DHCP_FILE_LEN (128 bytes)
     }
     else lstrcpyn (to, exp, DHCP_FILE_LEN - 1);
 
-    // truncate 
+    // truncate
     to [DHCP_FILE_LEN-1]=0;
 return to;
-} // TranslateExp 
+} // TranslateExpEx
+
+// Legacy TranslateExp function for backward compatibility
+char *TranslateExp (const char *exp, char *to, struct in_addr ip, const char *tMac)
+{
+    return TranslateExpEx(exp, to, ip, tMac, NULL);
+} // TranslateExp
 
 
 
@@ -630,7 +706,7 @@ void LoadLeases(void)
  
    // From Nick : I realized that there was a race condition in that code, 
    // particularly with the reading and saving of KEY_LEASE_NUMLEASES
-   // I’ve added a function, which LoadLeases calls immediately on entry:
+   // Iï¿½ve added a function, which LoadLeases calls immediately on entry:
    WaitForMsgQueueToFinish (LL_ID_SETTINGS);
 
    nAllocatedIP = 0;
