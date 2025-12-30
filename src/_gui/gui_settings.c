@@ -119,42 +119,44 @@ tResize [] =
 	{   IDC_REDUCE_PATH,            13, 275, 90,  8,   TAB_SETTINGS_TFTP,  },
 
 	// DHCP tab
- 	{   IDC_GRP_DHCP,                6, 213,228, 61,   TAB_SETTINGS_DHCP,  },
- 	{   IDC_CHECK_PING,             12, 222,115, 10,   TAB_SETTINGS_DHCP,  },
-  	{   IDC_CHECK_PERS_LEASES,      12, 233, 72, 10,   TAB_SETTINGS_DHCP,  },
-  	{   IDC_CHECK_DOUBLE_ANSWER,    12, 244,115, 10,   TAB_SETTINGS_DHCP,  },
- 	{   IDC_CHECK_LOCALIP_DHCP,     12, 255,114, 10,   TAB_SETTINGS_DHCP,  },
- 	{   IDC_CB_LOCALIP_DHCP,       139, 255, 85, 45,   TAB_SETTINGS_DHCP,  },
+	 	{   IDC_GRP_DHCP,                6, 234,228, 61,   TAB_SETTINGS_DHCP,  },
+	 	{   IDC_CHECK_PING,             12, 243,115, 10,   TAB_SETTINGS_DHCP,  },
+	  	{   IDC_CHECK_PERS_LEASES,      12, 254, 72, 10,   TAB_SETTINGS_DHCP,  },
+	  	{   IDC_CHECK_DOUBLE_ANSWER,    12, 265,115, 10,   TAB_SETTINGS_DHCP,  },
+	 	{   IDC_CHECK_LOCALIP_DHCP,     12, 276,114, 10,   TAB_SETTINGS_DHCP,  },
+	 	{   IDC_CB_LOCALIP_DHCP,       139, 276, 85, 45,   TAB_SETTINGS_DHCP,  },
 
- 	{   IDC_GRP_DHCP_POOL,          6,  21,228,   63, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_ADDRESS_POOL,      10,  33, 75,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_ADDRESS_POOL,     85,  33, 70,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_POOL_SIZE,         10,  45, 60,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_POOL_SIZE,        85,  45, 20,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_LEASE,		       10,  57, 60,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_LEASE,            85,  57, 30,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_BOOT_FILE,         10,  70, 65,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_BOOT_FILE,        85,  70, 145,  10, TAB_SETTINGS_DHCP,  },
+ 	{   IDC_GRP_DHCP_POOL,          6,  21,228,   83, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_TXT_ADDRESS_POOL,      10,  33, 75,   10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_DHCP_ADDRESS_POOL,     85,  33, 70,   10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_TXT_POOL_SIZE,         10,  45, 60,   10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_DHCP_POOL_SIZE,        85,  45, 20,   10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_TXT_LEASE,		       10,  57, 60,   10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_DHCP_LEASE,            85,  57, 30,   10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_TXT_BOOT_FILE,         10,  70, 100,  10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_DHCP_BOOT_FILE,        120, 70, 110,  10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_TXT_UEFI_BOOT_FILE,    10,  83, 100,  10, TAB_SETTINGS_DHCP,  },
+ 	 {   IDC_DHCP_UEFI_BOOT_FILE,   120, 83, 110,  10, TAB_SETTINGS_DHCP,  },
 
-	{   IDC_GRP_DHCP_OPT,          6,   89,228,  110, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_DEFAULT_ROUTER,    10,  98, 75,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_DEFAULT_ROUTER,   85,  98, 70,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_MASK,              10, 111, 75,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_MASK,             85, 111, 70,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_DNS_SERVER,        10, 123, 75,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_DNS_SERVER,       85, 123, 70,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_WINS_SERVER,       10, 135, 75,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_WINS_SERVER,      85, 135, 70,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_OPTION42,          10, 147, 75,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_OPTION42,         85, 147, 70,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_OPTION120,         10, 159, 65,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_OPTION120,        85, 159, 70,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_DOMAINNAME,        10, 172, 65,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_DOMAINNAME,       85, 172,145,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_TXT_ADDOPTION,         10, 185, 65,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_ADDOPTION_NB,     75, 185, 20,   10, TAB_SETTINGS_DHCP,  },
-    {   IDC_DHCP_ADDOPTION_VALUE,  95, 185,135,   10, TAB_SETTINGS_DHCP,  },
-    // {   IDC_DHCP_OK,              165,  44, 20,   85, TAB_SETTINGS_DHCP,  },
+	{   IDC_GRP_DHCP_OPT,          6,   110,228,  110, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_DEFAULT_ROUTER,    10, 119, 75,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_DEFAULT_ROUTER,   85, 119, 70,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_MASK,              10, 132, 75,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_MASK,             85, 132, 70,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_DNS_SERVER,        10, 144, 75,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_DNS_SERVER,       85, 144, 70,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_WINS_SERVER,       10, 156, 75,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_WINS_SERVER,      85, 156, 70,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_OPTION42,          10, 168, 75,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_OPTION42,         85, 168, 70,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_OPTION120,         10, 180, 65,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_OPTION120,        85, 180, 70,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_DOMAINNAME,        10, 193, 65,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_DOMAINNAME,       85, 193,145,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_TXT_ADDOPTION,         10, 206, 65,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_ADDOPTION_NB,     75, 206, 20,   10, TAB_SETTINGS_DHCP,  },
+	    {   IDC_DHCP_ADDOPTION_VALUE,  95, 206,135,   10, TAB_SETTINGS_DHCP,  },
+	    // {   IDC_DHCP_OK,              165,  44, 20,   85, TAB_SETTINGS_DHCP,  },
 	
 	// SYSLOG
 	{	IDC_GRP_SYSLOG,             6, 33,228, 70,   TAB_SETTINGS_SYSLOG,  },
@@ -351,7 +353,7 @@ char        sz [32];
 		sNewSettings.bVirtualRoot= ISDLG_CHECKED (hWnd, IDC_CHECK_VROOT);
         sNewSettings.bPXECompatibility = ISDLG_CHECKED (hWnd, IDC_CHECK_PXE);
 		
-        // Sécurité sur l'accès
+        // Sï¿½curitï¿½ sur l'accï¿½s
         if (ISDLG_CHECKED (hWnd, IDC_CHECK_TFTPLOCALIP))
              ComboBox_GetText (GetDlgItem(hWnd, IDC_CB_TFTPLOCALIP), sNewSettings.szTftpLocalIP, sizeof sNewSettings.szTftpLocalIP);
         else sNewSettings.szTftpLocalIP [0] = 0;
@@ -553,7 +555,7 @@ BOOL FormMain_OnInitDialog(HWND hWnd, HWND hwndFocus, LPARAM lParam)
      CHECK_DLG_IF (hWnd, IDC_CHECK_TFTPLOCALIP, sGuiSettings.szTftpLocalIP[0]!=0);
      ComboBox_Enable (GetDlgItem (hWnd, IDC_CB_TFTPLOCALIP), ISDLG_CHECKED (hWnd, IDC_CHECK_TFTPLOCALIP) );
 
-     // Fenêtre d'anticipation
+     // Fenï¿½tre d'anticipation
      CHECK_DLG_IF (hWnd, IDC_CHECK_WINSIZE, sGuiSettings.WinSize>0);
      Edit_Enable (GetDlgItem (hWnd, IDC_WINSIZE), sGuiSettings.WinSize > 0);
      // local ports
@@ -763,7 +765,7 @@ char  sz[128], *pCur, *pNext;
                       0,                      // Reserved.
                       KEY_READ,                // Requesting read access.
                     & hKey);                 // Address of key to be returned.
-    // Lire les données dans cette entrée
+    // Lire les donnï¿½es dans cette entrï¿½e
     READKEY (KEY_WINDOW_POS, sz);
     if (hKey!=INVALID_HANDLE_VALUE)
             RegCloseKey (hKey);

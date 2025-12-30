@@ -525,8 +525,11 @@ static struct S_DhcpOptions sDhcpOpt [] =       // 0 for unspecified
      case DHO_DHCP_RENEWAL_TIME       :  * (DWORD *) pOpt = htonl (sParamDHCP.nLease/2 * 60);  break ;
      case DHO_DHCP_REBINDING_TIME     :  * (DWORD *) pOpt = htonl ((sParamDHCP.nLease*80)/100 * 60);  break ;
      case DHO_BOOT_SIZE               :
-              // translate $IP$, $MAC$, and $ARCH$ from boot file name
-              TranslateExpEx (sParamDHCP.szBootFile, sz, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+              {
+                  const char *pszBootFile = GetBootFileByArch(pDhcpPkt->options);
+                  // translate $IP$, $MAC$, and $ARCH$ from boot file name
+                  TranslateExpEx (pszBootFile, sz, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+              }
               hFile = CreateFile(sz,        // open the file
                                  GENERIC_READ,                 // open for reading
                                  FILE_SHARE_READ,              // share for reading
@@ -706,7 +709,10 @@ DWORD sStaticIP;
             // populate the packet to be returned
             pDhcpPkt->op = BOOTREPLY;
             // translate $IP$, $MAC$, and $ARCH$ from boot file name
-            TranslateExpEx (sParamDHCP.szBootFile, pDhcpPkt->file, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+            {
+                const char *pszBootFile = GetBootFileByArch(pDhcpPkt->options);
+                TranslateExpEx (pszBootFile, pDhcpPkt->file, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+            }
            *pSize = DHCPOptionsReply (pDhcpPkt, DHCPOFFER, receivingAddress);
             break ;
 
@@ -720,10 +726,13 @@ DWORD sStaticIP;
 			if (sStaticIP != INADDR_NONE)
 			{
 			    // populate the packet to be returned
-                   pDhcpPkt->op = BOOTREPLY;
-                   pDhcpPkt->yiaddr.s_addr = sStaticIP;
-                 // translate $IP$, $MAC$, and $ARCH$ from boot file name
-                 TranslateExpEx (sParamDHCP.szBootFile, pDhcpPkt->file, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+			                pDhcpPkt->op = BOOTREPLY;
+			                pDhcpPkt->yiaddr.s_addr = sStaticIP;
+			              // translate $IP$, $MAC$, and $ARCH$ from boot file name
+			              {
+			                  const char *pszBootFile = GetBootFileByArch(pDhcpPkt->options);
+			                  TranslateExpEx (pszBootFile, pDhcpPkt->file, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+			              }
                    *pSize = DHCPOptionsReply (pDhcpPkt, DHCPACK, receivingAddress);
 				   break;
 			}
@@ -774,7 +783,10 @@ DWORD sStaticIP;
 				pDhcpPkt->op = BOOTREPLY;
 				pDhcpPkt->yiaddr.s_addr = pProposedIP->dwIP.s_addr;
 				// translate $IP$, $MAC$, and $ARCH$ from boot file name
-				TranslateExpEx (sParamDHCP.szBootFile, pDhcpPkt->file, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+				{
+				    const char *pszBootFile = GetBootFileByArch(pDhcpPkt->options);
+				    TranslateExpEx (pszBootFile, pDhcpPkt->file, pDhcpPkt->yiaddr, pDhcpPkt->chaddr, pDhcpPkt->options);
+				}
 				*pSize = DHCPOptionsReply (pDhcpPkt, DHCPACK, receivingAddress);
 			}
 			else

@@ -261,6 +261,7 @@ tDHCPd32Entry[] =
     KEY_DHCP_POOL,        sParamDHCP.szAddr ,          REG_SZ,    sizeof sParamDHCP.szAddr,
     KEY_DHCP_POOLSIZE,  & sParamDHCP.nPoolSize,        REG_DWORD, sizeof sParamDHCP.nPoolSize,
     KEY_DHCP_BOOTFILE,    sParamDHCP.szBootFile,       REG_SZ,    sizeof sParamDHCP.szBootFile,
+    KEY_DHCP_UEFI_BOOTFILE, sParamDHCP.szUefiBootFile, REG_SZ, sizeof sParamDHCP.szUefiBootFile,
     KEY_DHCP_DNS,         sParamDHCP.szDns1 ,          REG_SZ,    sizeof sParamDHCP.szDns1,
     KEY_DHCP_DNS2,        sParamDHCP.szDns2 ,          REG_SZ,    sizeof sParamDHCP.szDns2,
     KEY_DHCP_WINS,        sParamDHCP.szWins ,          REG_SZ ,   sizeof sParamDHCP.szWins,
@@ -955,3 +956,67 @@ ULONG forwardTableSize=0;
 
 return Rc;
 } // DHCP Send
+
+///////////////////////////////////////////////////
+// Dual Boot Support: Architecture-specific boot file selection
+///////////////////////////////////////////////////
+
+/**
+* GetBootFileByArch - Select appropriate boot file based on client architecture
+*
+* This function inspects the DHCP Option 93 (PXE Client Architecture ID)
+* and returns the appropriate boot file:
+* - For Legacy BIOS (arch ID 0x0000): returns szBootFile
+* - For UEFI (arch ID >= 0x0006): returns szUefiBootFile if configured,
+*   otherwise falls back to szBootFile
+* - For other cases: returns szBootFile as default
+*
+* @param pDhcpOptions Pointer to DHCP options buffer
+* @return Pointer to the appropriate boot file string
+*/
+const char *GetBootFileByArch(unsigned char *pDhcpOptions)
+{
+   unsigned short nArchId;
+   
+   if (pDhcpOptions == NULL)
+       return sParamDHCP.szBootFile;
+   
+   // Search for DHCP Option 93 (PXE Client Architecture ID)
+   // Format: 93 [length] [2 bytes arch id]
+   unsigned char *p = pDhcpOptions + 4; // Skip magic cookie
+   while (*p != DHO_END && p < pDhcpOptions + DHCP_OPTION_LEN - 3)
+   {
+       if (*p == DHO_PAD)
+       {
+           p++;
+       }
+       else if (*p == DHO_PXE_CLIENT_ARCH_ID && p[1] == 2)
+       {
+           nArchId = ntohs(*(unsigned short*)(p + 2));
+           
+           // Check architecture type
+           if (nArchId == 0x0000)
+           {
+               // Legacy BIOS (Intel x86 PC)
+               return sParamDHCP.szBootFile;
+           }
+           else
+           {
+               // UEFI types (EFI IA32, EFI BC, EFI Xscale, EFI IA64, ARM, ARM64, RISC-V, etc.)
+               // Use szUefiBootFile if configured, otherwise fallback to szBootFile
+               if (sParamDHCP.szUefiBootFile[0] == '\0')
+               {
+                   return sParamDHCP.szBootFile;
+               }
+               return sParamDHCP.szUefiBootFile;
+           }
+       }
+       else
+       {
+           p += 2 + p[1];
+       }
+   }
+   
+   // Default: return Legacy BIOS boot file
+   return sParamDHCP.szBootFile;
+} // GetBootFileByArch

@@ -135,6 +135,7 @@ BOOL Tftpd32DestroySettings (void);
 #define KEY_DHCP_POOL                 "IP_Pool"
 #define KEY_DHCP_POOLSIZE             "PoolSize"
 #define KEY_DHCP_BOOTFILE             "BootFile"
+#define KEY_DHCP_UEFI_BOOTFILE       "UefiBootFile"
 #define KEY_DHCP_DNS                  "DNS"
 #define KEY_DHCP_DNS2                 "DNS2"
 #define KEY_DHCP_WINS                 "WINS"

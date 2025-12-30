@@ -219,6 +219,7 @@
 #define	   IDC_DHCP_OPTION42        3013
 #define	   IDC_DHCP_OPTION120       3014
 #define    IDC_DHCP_WINS_SERVER     3015
+#define    IDC_DHCP_UEFI_BOOT_FILE  3016
 
 #define    IDC_TXT_DEFAULT_ROUTER  3101
 #define    IDC_TXT_ADDRESS_POOL    3102
@@ -232,6 +233,7 @@
 #define    IDC_TXT_OPTION42        3110
 #define    IDC_TXT_OPTION120	   3111
 #define    IDC_TXT_WINS_SERVER	   3112
+#define    IDC_TXT_UEFI_BOOT_FILE  3113
 
 #define   IDC_DHCP_OK     3200
 #define   IDC_LV_DHCP	  3300

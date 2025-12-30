@@ -114,7 +114,8 @@ char szBuf[256];
    SetDlgItemText (hMainWnd, IDC_DHCP_OPTION42,      sGuiParamDHCP.szOpt42);
    SetDlgItemText (hMainWnd, IDC_DHCP_OPTION120,     sGuiParamDHCP.szOpt120);
    SetDlgItemText (hMainWnd, IDC_DHCP_BOOT_FILE,     sGuiParamDHCP.szBootFile);
-   SetDlgItemInt  (hMainWnd, IDC_DHCP_POOL_SIZE,     sGuiParamDHCP.nPoolSize, FALSE); 
+   SetDlgItemText (hMainWnd, IDC_DHCP_UEFI_BOOT_FILE, sGuiParamDHCP.szUefiBootFile);
+   SetDlgItemInt  (hMainWnd, IDC_DHCP_POOL_SIZE,     sGuiParamDHCP.nPoolSize, FALSE);
    SetDlgItemInt  (hMainWnd, IDC_DHCP_LEASE,         sGuiParamDHCP.nLease, FALSE);
    SetDlgItemText (hMainWnd, IDC_DHCP_DOMAINNAME,    sGuiParamDHCP.szDomainName);
 
@@ -157,8 +158,9 @@ char sz [256], *p=NULL;	// DNS Server
      GetDlgItemText (hMainWnd, IDC_DHCP_OPTION42,  sNewParamDHCP.szOpt42, sizeof sNewParamDHCP.szOpt42 - 1);
 		 if (CheckInetAddress (hMainWnd, sNewParamDHCP.szOpt42, "DHCP NTP Server", FALSE)) iErr=1;
      GetDlgItemText (hMainWnd, IDC_DHCP_OPTION120,  sNewParamDHCP.szOpt120, sizeof sNewParamDHCP.szOpt120 - 1);
-		 if (CheckInetAddress (hMainWnd, sNewParamDHCP.szOpt120, "DHCP SIP Server", FALSE)) iErr=1;
+  if (CheckInetAddress (hMainWnd, sNewParamDHCP.szOpt120, "DHCP SIP Server", FALSE)) iErr=1;
      GetDlgItemText (hMainWnd, IDC_DHCP_BOOT_FILE,   sNewParamDHCP.szBootFile, sizeof sNewParamDHCP.szBootFile - 1);
+     GetDlgItemText (hMainWnd, IDC_DHCP_UEFI_BOOT_FILE, sNewParamDHCP.szUefiBootFile, sizeof sNewParamDHCP.szUefiBootFile - 1);
      GetDlgItemText (hMainWnd, IDC_DHCP_DOMAINNAME,  sNewParamDHCP.szDomainName, sizeof sNewParamDHCP.szDomainName - 1);
 
 	 // split the DNS server field if a ,; or space is found

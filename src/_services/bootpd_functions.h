@@ -37,3 +37,4 @@ int TranslateParam2Value (void *buffer, int len, const char *opt_val, struct in_
 char *TranslateExpEx (const char *exp, char *to, struct in_addr ip, const char *tMac, unsigned char *pDhcpOptions);
 char *TranslateExp (const char *exp, char *to, struct in_addr ip, const char *tMac);
 int ArpDeleteHost(struct in_addr addr);
+const char *GetBootFileByArch(unsigned char *pDhcpOptions);

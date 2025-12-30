@@ -49,7 +49,8 @@ struct S_DHCP_Param
 //   struct in_addr  dwOpt120;
    char            szOpt120[64];
 
-   char            szBootFile[256];
+   char            szBootFile[256];      // Legacy BIOS boot file
+   char            szUefiBootFile[256]; // UEFI boot file
    char            szDomainName[128];
    int             nLease;
    int             nIgnoreBootp;
