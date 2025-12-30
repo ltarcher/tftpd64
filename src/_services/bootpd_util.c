@@ -865,6 +865,157 @@ return Ark<nAllocatedIP ? tFirstIP[Ark] : NULL ;
 } // DHCPSearchByMacAddress
 
 
+/**
+ * 清除指定 MAC 地址的所有旧分配记录
+ * 保留最新的一个记录（优先保留 tRenewed>0 的），删除其他重复记录
+ *
+ * 此函数用于解决 iPXE 等引导程序在多次 DHCP 请求时
+ * 导致同一 MAC 地址占用多个 IP 资源的问题。
+ *
+ * @param pMac MAC 地址
+ * @param nMacLen MAC 地址长度
+ * @return 删除的记录数量
+ */
+int DHCPCleanupOldMacAllocations(const unsigned char *pMac, int nMacLen)
+{
+    int Ark;
+    struct LL_IP *pKeep = NULL;
+    time_t tLatestRenewed = 0;
+    time_t tLatestAllocated = 0;
+    time_t tNow;
+    int nFoundCount = 0;
+    int nDeleted = 0;  // 记录删除的数量
+    
+    if (nMacLen < 6 || tMAC == NULL || nAllocatedIP <= 0)
+        return NULL;
+        
+    time(&tNow);
+    
+    // 1. 扫描所有记录，找出该 MAC 的所有分配
+    //    并选择保留最新的那一个（优先 tRenewed，其次 tAllocated）
+    LOG(12, "Checking for duplicate MAC allocations: %s", haddrtoa(pMac, nMacLen, ':'));
+    
+    for (Ark = 0; Ark < nAllocatedIP; Ark++)
+    {
+        struct LL_IP *pItem = tMAC[Ark];
+        
+        // 检查是否为空记录
+        if (IsMacEmpty(pItem))
+            continue;
+            
+        // 检查是否匹配目标 MAC
+        if (memcmp(pItem->sMacAddr, pMac, min(nMacLen, 6)) == 0)
+        {
+            nFoundCount++;
+            
+            // 判断是否应该保留这个记录
+            if (pItem->tRenewed > tLatestRenewed)
+            {
+                // 这个记录有更新的 renew 时间，应该保留
+                if (pKeep != NULL && pKeep != pItem)
+                {
+                    time_t age = tNow - pKeep->tRenewed;
+                    LOG(5, "Marking older allocation for deletion: IP %s (renewed %ld sec ago)",
+                         inet_ntoa(pKeep->dwIP), pKeep->tRenewed ? age : 0);
+                }
+                tLatestRenewed = pItem->tRenewed;
+                pKeep = pItem;
+            }
+            else if (pItem->tRenewed == 0 && tLatestRenewed == 0)
+            {
+                // 两个记录都未 renewed，比较分配时间
+                if (pItem->tAllocated > tLatestAllocated)
+                {
+                    if (pKeep != NULL && pKeep != pItem)
+                    {
+                        time_t age = tNow - pKeep->tAllocated;
+                        LOG(5, "Marking older allocation for deletion: IP %s (allocated %ld sec ago)",
+                             inet_ntoa(pKeep->dwIP), pKeep->tAllocated ? age : 0);
+                    }
+                    tLatestAllocated = pItem->tAllocated;
+                    pKeep = pItem;
+                }
+                else
+                {
+                    // 这是一个旧记录
+                    time_t age = pItem->tAllocated ? (tNow - pItem->tAllocated) : 0;
+                    LOG(5, "Found duplicate allocation for MAC %s: IP %s (allocated %ld sec ago, not renewed)",
+                         haddrtoa(pMac, nMacLen, ':'),
+                         inet_ntoa(pItem->dwIP), age);
+                }
+            }
+            else
+            {
+                // 这是一个旧记录（已 renewed 但时间更早）
+                time_t age = pItem->tRenewed ? (tNow - pItem->tRenewed) : 0;
+                time_t age_alloc = pItem->tAllocated ? (tNow - pItem->tAllocated) : 0;
+                LOG(5, "Found duplicate allocation for MAC %s: IP %s (allocated %ld sec ago, renewed %ld sec ago)",
+                     haddrtoa(pMac, nMacLen, ':'),
+                     inet_ntoa(pItem->dwIP), age_alloc, age);
+            }
+        }
+    }
+    
+    // 如果没有找到该 MAC 的记录，直接返回
+    if (nFoundCount == 0)
+    {
+        return NULL;
+    }
+    
+    if (nFoundCount > 1)
+    {
+        LOG(5, "Found %d duplicate IP allocations for MAC %s, will clean up old ones",
+             nFoundCount, haddrtoa(pMac, nMacLen, ':'));
+    }
+    
+    // 2. 删除该 MAC 的所有旧记录（保留 pKeep）
+    //    使用从后向前的遍历，避免删除元素影响索引
+    if (nAllocatedIP > 0)
+    {
+        int nDeleted = 0;
+        for (Ark = nAllocatedIP - 1; Ark >= 0; Ark--)
+        {
+            struct LL_IP *pItem = tMAC[Ark];
+            
+            if (!IsMacEmpty(pItem) &&
+                memcmp(pItem->sMacAddr, pMac, min(nMacLen, 6)) == 0)
+            {
+                // 这是一个匹配的记录
+                if (pItem != pKeep)
+                {
+                    LOG(5, "Deleting duplicate allocation: IP %s for MAC %s",
+                         inet_ntoa(pItem->dwIP),
+                         haddrtoa(pMac, nMacLen, ':'));
+                    DHCPDestroyItem(pItem);
+                    nDeleted++;
+                }
+            }
+        }
+        
+        if (nDeleted > 0)
+        {
+            LOG(5, "Cleanup completed: deleted %d old allocation(s) for MAC %s, keep IP %s",
+                 nDeleted, haddrtoa(pMac, nMacLen, ':'),
+                 pKeep ? inet_ntoa(pKeep->dwIP) : "none");
+        }
+    }
+    
+    if (pKeep)
+    {
+        LOG(12, "Kept allocation: IP %s for MAC %s",
+             inet_ntoa(pKeep->dwIP),
+             haddrtoa(pMac, nMacLen, ':'));
+    }
+    
+    // 返回删除的记录数量（nFoundCount - 1 表示删除了 nFoundCount-1 个旧记录）
+    if (nFoundCount > 0)
+    {
+        return nDeleted;
+    }
+    return 0;
+}
+
+
 #if 0 //We are no longer using the registry
 // Search in configuration file/registry by Mac Address
 struct LL_IP *DHCPSearchByRegistry (const unsigned char *pMac, int nMacLen)

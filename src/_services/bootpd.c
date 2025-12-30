@@ -226,35 +226,48 @@ time_t  tNow;
 int     Ark;
 struct LL_IP *pCurIP /*, *pOldestIP*/;
 #define TWO_MINUTES 120
+#define ARP_PROTECTION_TIME 10  // 新分配IP的保护时间（秒），防止刚分配的IP被ARP ping误删
 	
 //If true, the client has requested an IP address that we should try to honor
 int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAddr));
 
-   // search for the previously allocated mac address
+   // iPXE 多次 DHCP 分配问题的修复：
+   // 在分配 IP 之前，先清理同一 MAC 地址的所有旧分配记录
+   // 确保一个 MAC 地址只对应一个活跃的 IP 分配，避免 IP 池被占用
    if (nMacLen>=6) // Ethernet Mac address
    {
-	   // search if mac the mac address is already known
+       // 清理旧分配，并获取保留的记录数
+       int nCleaned = DHCPCleanupOldMacAllocations(pMac, nMacLen);
+       if (nCleaned > 0)
+       {
+           LOG(12, "Cleaned %d old allocation(s) for MAC %s",
+               nCleaned, haddrtoa((unsigned char*)pMac, nMacLen, ':'));
+       }
+    
+     // search if mac the mac address is already known
        pCurIP = DHCPSearchByMacAddress (pMac, nMacLen);
-	   if(pCurIP) 
-	   {
-		   //We found the previous MAC record.  If the address requested is invalid, use
-		   //the address in the record.  If it is valid, erase the record, since we should
-		   //give the requested address
-		   if(!useprev || (pPreviousAddr->s_addr == pCurIP->dwIP.s_addr))
-		   {
-				LOG (12, "Reply with previously allocated : %s", inet_ntoa (pCurIP->dwIP));
-				SetAllocTime(pCurIP);
-				return pCurIP;
-		   }
-		   else //Remove the old address, and continue with the allocation logic
-		   {
-			   //Destroying the item takes care of the macaddr table as well.
-			   DHCPDestroyItem (pCurIP);
-			   pCurIP = NULL;
-		   }
-       } // mac address found
+     if(pCurIP)
+     {
+      //We found the previous MAC record.  If the address requested is invalid, use
+      //the address in the record.  If it is valid, erase the record, since we should
+      //give the requested address
+      if(!useprev || (pPreviousAddr->s_addr == pCurIP->dwIP.s_addr))
+      {
+   		LOG (12, "Reply with previously allocated : %s", inet_ntoa (pCurIP->dwIP));
+   		SetAllocTime(pCurIP);
+   		return pCurIP;
+      }
+      else //Remove the old address, and continue with the allocation logic
+      {
+   	   //Destroying the item takes care of the macaddr table as well.
+   	   LOG(12, "Removing old allocation %s for MAC %s to allocate new address",
+   	       inet_ntoa(pCurIP->dwIP), haddrtoa((unsigned char*)pMac, nMacLen, ':'));
+   	   DHCPDestroyItem (pCurIP);
+   	   pCurIP = NULL;
+      }
+        } // mac address found
 
-    } // mac address not valid
+     } // mac address not valid
 
 
     // search if requested address can be granted
@@ -357,45 +370,58 @@ DWORD mask = inet_addr(sParamDHCP.szMask);
 BOOL  bFound=FALSE;
   do
   {
-     pCurIP = DHCP_IPAllocate2 (pPreviousAddr, pMac, nMacLen);
+      pCurIP = DHCP_IPAllocate2 (pPreviousAddr, pMac, nMacLen);
 	 // 2010/09/27  Colin from Shangai points out that ICMP check should be done only for DISCOVER
-     //  if (pCurIP!=NULL  &&  sSettings.bPing  && nDhcpType==DHCPDISCOVER)
-     if (pCurIP==NULL  ||  ! sSettings.bPing  ||  nDhcpType!=DHCPDISCOVER)  
-		 bFound=TRUE;
+	     //  if (pCurIP!=NULL  &&  sSettings.bPing  && nDhcpType==DHCPDISCOVER)
+	     if (pCurIP==NULL  ||  ! sSettings.bPing  ||  nDhcpType!=DHCPDISCOVER)
+ 	 	 bFound=TRUE;
 	 else
-     {
+	     {
 	   
-       // frees the ARP cache and send an ARP request 
-	   // nov 2013 : ping has been suppressed, trust ARP alone
-	   if  (FindNearestServerAddress ( (struct in_addr *) & pCurIP->dwIP, (struct in_addr *) & mask, TRUE) != NULL)
-	   {
-		   // same network 
-			ArpDeleteHost (pCurIP->dwIP);
-			Rc = SendARP(pCurIP->dwIP.s_addr, 0, dummy_mac, &dummy_maclen);
-			if (Rc == NO_ERROR)
-		    {
-			   LOG (2, "Suppress arp-able address %s", inet_ntoa (pCurIP->dwIP));
-			   DHCPReallocItem (pCurIP, pCurIP->dwIP.s_addr, FREE_DHCP_ADDRESS, 6);
-			   SetRenewTime (pCurIP);
-		    }
-			else bFound=TRUE;
-	   }
-	   else
-	   {
-		    Rc =    PingApi (&pCurIP->dwIP, DHCP_PINGTIMEOUT, NULL) ;
-		    if (Rc>0)
-		    {
-		 	   LOG (2, "Suppress pingable address %s", inet_ntoa (pCurIP->dwIP));
-	 		   DHCPReallocItem (pCurIP, pCurIP->dwIP.s_addr, FREE_DHCP_ADDRESS, 6);
-			   SetRenewTime (pCurIP);
-		    }
-		    else if (Rc==PINGAPI_TIMEOUT  ||  Rc==PINGAPI_UNREACHABLE  ||  Rc==PINGAPI_TTLEXPIRE) 
-					bFound=TRUE;
-		    else { LOG (1, "Ping Error %d (%s)", WSAGetLastError (), LastErrorText() ); Sleep (100); bFound=TRUE; }
-	   } // different network use ping instead of ARP
-     } // bPing Settings
-  } 
-  while (pCurIP!=NULL && ! bFound); // should exit by bFound
+	       // iPXE ARP 保护：检查 IP 是否刚分配，避免误删客户端正在使用的地址
+	       time_t tCurrent;
+	       time(&tCurrent);
+	       BOOL bRecentlyAllocated = (pCurIP->tAllocated > 0) && (tCurrent - pCurIP->tAllocated < ARP_PROTECTION_TIME);
+	       if (bRecentlyAllocated)
+	       {
+	           LOG(12, "ARP protection: %s allocated %ld sec ago, skip check",
+	               inet_ntoa(pCurIP->dwIP), (long)(tCurrent - pCurIP->tAllocated));
+	           bFound = TRUE;
+	       }
+	       else
+	       {
+	           // frees the ARP cache and send an ARP request
+	           // nov 2013 : ping has been suppressed, trust ARP alone
+	           if  (FindNearestServerAddress ( (struct in_addr *) & pCurIP->dwIP, (struct in_addr *) & mask, TRUE) != NULL)
+	           {
+	               // same network
+	               ArpDeleteHost (pCurIP->dwIP);
+	               Rc = SendARP(pCurIP->dwIP.s_addr, 0, dummy_mac, &dummy_maclen);
+	               if (Rc == NO_ERROR)
+	               {
+	                   LOG (2, "Suppress arp-able address %s", inet_ntoa (pCurIP->dwIP));
+	                   DHCPReallocItem (pCurIP, pCurIP->dwIP.s_addr, FREE_DHCP_ADDRESS, 6);
+	                   SetRenewTime (pCurIP);
+	               }
+	               else bFound=TRUE;
+	           }
+	           else
+	           {
+		            Rc = PingApi (&pCurIP->dwIP, DHCP_PINGTIMEOUT, NULL) ;
+		            if (Rc>0)
+		            {
+				 	   LOG (2, "Suppress pingable address %s", inet_ntoa (pCurIP->dwIP));
+	 		   		   DHCPReallocItem (pCurIP, pCurIP->dwIP.s_addr, FREE_DHCP_ADDRESS, 6);
+				   	   SetRenewTime (pCurIP);
+		            }
+		            else if (Rc==PINGAPI_TIMEOUT  ||  Rc==PINGAPI_UNREACHABLE  ||  Rc==PINGAPI_TTLEXPIRE)
+						bFound=TRUE;
+		            else { LOG (1, "Ping Error %d (%s)", WSAGetLastError (), LastErrorText() ); Sleep (100); bFound=TRUE; }
+	           }
+	       }
+      } // bPing Settings
+   }
+   while (pCurIP!=NULL && ! bFound); // should exit by bFound
 return pCurIP;
 }
 

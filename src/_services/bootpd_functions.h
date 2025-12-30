@@ -29,6 +29,7 @@ void LoadLeases (void);
 void FreeLeases (BOOL freepool);
 struct LL_IP *DHCPSearchByIP (const struct in_addr *pAddr, BOOL* wasexpired);
 struct LL_IP *DHCPSearchByMacAddress (const unsigned char *pMac, int nMacLen);
+int DHCPCleanupOldMacAllocations(const unsigned char *pMac, int nMacLen);
 
 void Dhcp_Send_Leases (const struct LL_IP *tIP[], int nbLeases);
 void DHCPDestroyItem (struct LL_IP *pCur);
