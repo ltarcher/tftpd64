@@ -17,6 +17,10 @@
 #include "threading.h"
 #include "bootpd_functions.h"
 
+// Static MAC-IP binding storage
+struct StaticBinding *tStaticBindings = NULL;
+int nStaticBindingCount = 0;
+
 
 
 /*
@@ -35,6 +39,7 @@ DWORD dwIpAddr = 0;
 INT iRet;
 MIB_IPNETROW DelHost;
 DWORD Ark;
+char *szIPAddr;
 
     /* check IP address */
     dwIpAddr = addr.s_addr;
@@ -45,26 +50,27 @@ DWORD Ark;
 
     /* allocate memory for ARP address table */
     pIpNetTable = (PMIB_IPNETTABLE) calloc (Size, 1);
-    if (		pIpNetTable == NULL 
+    if (		pIpNetTable == NULL
 		||   (iRet = GetIpNetTable(pIpNetTable, &Size, TRUE)) != NO_ERROR )
         goto cleanup;
 
      /* we need to read the ARP table in order to get the right interface table */
-	for ( Ark=0 ; 
-		  Ark<pIpNetTable->dwNumEntries && pIpNetTable->table[Ark].dwAddr != dwIpAddr ; 
+	for ( Ark=0 ;
+		  Ark<pIpNetTable->dwNumEntries && pIpNetTable->table[Ark].dwAddr != dwIpAddr ;
 		  Ark++) ;
 	if ( Ark<pIpNetTable->dwNumEntries )
 	{
         DelHost.dwAddr = dwIpAddr;
         DelHost.dwIndex = pIpNetTable->table[Ark].dwIndex;
 		iRet = DeleteIpNetEntry (& DelHost);
-		if (iRet != NO_ERROR) LOG (5, "IP address %s flushed from ARP table", inet_ntoa (addr));
+		szIPAddr = inet_ntoa (addr);
+		if (iRet != NO_ERROR) LOG (5, "IP address %s flushed from ARP table", szIPAddr);
     }
 
 cleanup:
     if (pIpNetTable != NULL) free (pIpNetTable);
     return 0;
-} // ArpDeleteHost 
+} // ArpDeleteHost
 
 /*
  * Searches adapters for the one that has an IP addressed assigned to
@@ -359,13 +365,14 @@ char szBuf[128];
 			return FALSE;
 	   }
 	   LoadLeases ();
-   }
-
-   if (sParamDHCP.nLease==0)
-   {  
-      sParamDHCP.nLease=DHCP_DEFAULT_LEASE_TIME;
-      LOG (12, "%d, Lease time not specified, set to 2 days", GetCurrentThreadId ());
-   }
+	   LoadStaticBindings ();
+	   }
+	
+	   if (sParamDHCP.nLease==0)
+	  {
+	     sParamDHCP.nLease=DHCP_DEFAULT_LEASE_TIME;
+	     LOG (12, "Lease time not specified, set to 2 days");
+	  }
    // compatability 3 -> 4
    if (sParamDHCP.szWins[0]==0  && sParamDHCP.szDns1[0]!=0)
    {
@@ -772,6 +779,316 @@ void LoadLeases(void)
 
 } // LoadLeases
 
+/**
+ * 比较静态绑定数组两个元素的IP地址（用于qsort）
+ */
+static int StaticBindingCompare(const void *p1, const void *p2)
+{
+    DWORD addr1 = ntohl(((const struct StaticBinding*)p1)->dwIP);
+    DWORD addr2 = ntohl(((const struct StaticBinding*)p2)->dwIP);
+    
+    if (addr1 < addr2) return -1;
+    if (addr1 > addr2) return 1;
+    return 0;
+}
+
+/**
+ * 检查字符串是否为有效的MAC地址格式（XX:XX:XX:XX:XX:XX）
+ */
+static BOOL IsValidMacAddressFormat(const char *str)
+{
+    int i, colonCount = 0;
+    
+    if (strlen(str) != 17)  // AA:BB:CC:DD:EE:FF 正好17个字符
+        return FALSE;
+    
+    for (i = 0; i < 17; i++)
+    {
+        if (i % 3 == 2)  // 位置 2, 5, 8, 11, 14 应该是冒号
+        {
+            if (str[i] != ':')
+                return FALSE;
+            colonCount++;
+        }
+        else  // 其他位置应该是十六进制字符
+        {
+            if (!isxdigit(str[i]))
+                return FALSE;
+        }
+    }
+    
+    return colonCount == 5;
+}
+
+/**
+ * 加载所有静态MAC-IP绑定到内存
+ * 从注册表/INI文件中读取所有MAC地址键，过滤出MAC格式键并加载对应IP值
+ * 返回加载的静态绑定数量
+ */
+DWORD LoadStaticBindings(void)
+{
+    HKEY hKey;
+    DWORD dwResult;
+    char szKeyName[256];
+    char szValue[64];
+    char *szConfigSource;
+    DWORD dwKeyNameSize, dwValueSize, dwValueType;
+    DWORD dwIP;
+    int nCapacity = 0;
+    int i;
+    
+    LOG(10, "=== Loading static MAC-IP bindings from storage ===");
+    
+    // 首先释放旧的绑定（如果存在）
+    FreeStaticBindings();
+    
+    // 确定配置存储介质
+    if (szTftpd32IniFile[0] != 0)
+    {
+        // 从 INI 文件加载静态绑定
+        // 注意：ReadKey 函数在找到INI键后仍返回0，这里需要直接解析INI文件
+        // 提取 section 名称（TFTPD32_DHCP_KEY 格式为 "SOFTWARE\\TFTPD32\\DHCP"，section 为 "DHCP"）
+        char szSection[64];
+        char szAllKeys[8192];  // 用于存储所有键名的缓冲区
+        char *pKey;
+        const char *pLastBackslash;
+        
+        // 从 TFTPD32_DHCP_KEY 中提取最后的 section 名称
+        pLastBackslash = strrchr(TFTPD32_DHCP_KEY, '\\');
+        if (pLastBackslash != NULL)
+        {
+            lstrcpyn(szSection, pLastBackslash + 1, sizeof(szSection));
+        }
+        else
+        {
+            lstrcpyn(szSection, TFTPD32_DHCP_KEY, sizeof(szSection));
+        }
+        
+        szConfigSource = szTftpd32IniFile;
+        LOG(10, "Configuration source: INI file %s, Section: %s", szConfigSource, szSection);
+        
+        // 使用 GetPrivateProfileStringA 枚举 INI 文件中的所有键
+        dwResult = GetPrivateProfileStringA(szSection, NULL, NULL, szAllKeys, sizeof(szAllKeys), szTftpd32IniFile);
+        
+        if (dwResult == 0 || szAllKeys[0] == '\0')
+        {
+            LOG(10, "No keys found in INI section [%s]", szSection);
+            // 尝试从注册表读取
+            goto TryRegistry;
+        }
+        
+        LOG(10, "Found %d bytes of key names in section [%s]", dwResult, szSection);
+        
+        // 遍历所有键名（由空字符分隔，以双空字符结尾）
+        nStaticBindingCount = 0;
+        nCapacity = 32;  // 初始容量
+        tStaticBindings = (struct StaticBinding*)calloc(nCapacity, sizeof(struct StaticBinding));
+        
+        if (tStaticBindings == NULL)
+        {
+            LOG(1, "Failed to allocate memory for static bindings");
+            return 0;
+        }
+        
+        for (pKey = szAllKeys; *pKey != '\0'; pKey += strlen(pKey) + 1)
+        {
+            // 检查是否为 MAC 地址格式的键
+            if (!IsValidMacAddressFormat(pKey))
+            {
+                LOG(12, "Skipping non-MAC key: %s", pKey);
+                continue;
+            }
+            
+            // 读取该键的值（IP地址）
+            GetPrivateProfileStringA(szSection, pKey, "", szValue, sizeof(szValue), szTftpd32IniFile);
+            
+            if (szValue[0] == '\0')
+            {
+                LOG(12, "Skipping MAC key %s with empty value", pKey);
+                continue;
+            }
+            
+            // 验证并转换IP地址
+            dwIP = inet_addr(szValue);
+            if (dwIP == INADDR_NONE || dwIP == 0)
+            {
+                LOG(1, "Invalid IP address '%s' for MAC %s, skipping", szValue, pKey);
+                continue;
+            }
+            
+            // 扩展数组容量（如需要）
+            if (nStaticBindingCount >= nCapacity)
+            {
+                int nNewCapacity = nCapacity * 2;
+                struct StaticBinding *pTemp;
+                
+                pTemp = (struct StaticBinding*)realloc(tStaticBindings, nNewCapacity * sizeof(struct StaticBinding));
+                if (pTemp == NULL)
+                {
+                    LOG(1, "Failed to expand static bindings array");
+                    FreeStaticBindings();
+                    return 0;
+                }
+                
+                tStaticBindings = pTemp;
+                nCapacity = nNewCapacity;
+                LOG(5, "Expanded static bindings array to capacity %d", nCapacity);
+            }
+            
+            // 解析并存储MAC地址
+            atohaddr(pKey, tStaticBindings[nStaticBindingCount].sMac, 6);
+            tStaticBindings[nStaticBindingCount].dwIP = dwIP;
+            
+            LOG(5, "[INI] %d. Loaded binding: MAC=%s -> IP=%s",
+                 nStaticBindingCount + 1, pKey, szValue);
+            
+            nStaticBindingCount++;
+        }
+        
+        // 打印已加载的绑定摘要
+        if (nStaticBindingCount > 0)
+        {
+            LOG(0, "=== Summary: Loaded %d static MAC-IP bindings from INI file ===", nStaticBindingCount);
+            goto Sorting;
+        }
+        else
+        {
+            LOG(0, "No static bindings found in INI file, trying registry...");
+            FreeStaticBindings();
+        }
+    }
+    
+    // 从注册表加载静态绑定（INI文件为空或不存在时）
+TryRegistry:
+    szConfigSource = "Registry";
+    LOG(10, "Loading static bindings from Registry: %s", TFTPD32_DHCP_KEY);
+    
+    // 打开DHCP注册表键
+    dwResult = RegOpenKeyExA(HKEY_LOCAL_MACHINE, TFTPD32_DHCP_KEY, 0, KEY_READ, &hKey);
+    
+    if (dwResult != ERROR_SUCCESS)
+    {
+        LOG(10, "Failed to open DHCP registry key for static bindings (error %d)", dwResult);
+        LOG(0, "No configuration source found for static bindings");
+        return 0;
+    }
+    
+    // 初始化容量
+    nCapacity = 32;
+    tStaticBindings = (struct StaticBinding*)calloc(nCapacity, sizeof(struct StaticBinding));
+    
+    if (tStaticBindings == NULL)
+    {
+        LOG(1, "Failed to allocate memory for static bindings");
+        RegCloseKey(hKey);
+        return 0;
+    }
+    
+    LOG(10, "Enumerating registry values in: %s", TFTPD32_DHCP_KEY);
+    
+    // 枚举所有注册表值，寻找MAC地址格式的键
+    nStaticBindingCount = 0;
+    dwResult = ERROR_SUCCESS;
+    while (dwResult == ERROR_SUCCESS)
+    {
+        dwKeyNameSize = sizeof(szKeyName) - 1;
+        dwValueSize = sizeof(szValue) - 1;
+        dwValueType = REG_SZ;
+        
+        dwResult = RegEnumValueA(hKey, nStaticBindingCount, szKeyName, &dwKeyNameSize,
+                                NULL, &dwValueType, (LPBYTE)szValue, &dwValueSize);
+        
+        if (dwResult == ERROR_NO_MORE_ITEMS)
+        {
+            break;  // 枚举完成
+        }
+        
+        if (dwResult != ERROR_SUCCESS)
+        {
+            LOG(1, "Error enumerating registry value at index %d", nStaticBindingCount);
+            continue;
+        }
+        
+        // 只处理字符串类型的值
+        if (dwValueType != REG_SZ)
+        {
+            continue;
+        }
+        
+        // 只处理MAC格式的键（跳过系统键如IP_Pool、PoolSize等）
+        if (IsValidMacAddressFormat(szKeyName))
+        {
+            LOG(5, "Found MAC key in registry: %s -> %s", szKeyName, szValue);
+            
+            // 验证值是否为有效的IP地址
+            dwIP = inet_addr(szValue);
+            if (dwIP == INADDR_NONE || dwIP == 0)
+            {
+                LOG(1, "Invalid IP address '%s' for MAC %s, skipping", szValue, szKeyName);
+                continue;
+            }
+            
+            // 扩容（如需要）
+            if (nStaticBindingCount >= nCapacity)
+            {
+                int nNewCapacity = nCapacity * 2;
+                struct StaticBinding *pTemp;
+                
+                pTemp = (struct StaticBinding*)realloc(tStaticBindings, nNewCapacity * sizeof(struct StaticBinding));
+                if (pTemp == NULL)
+                {
+                    LOG(1, "Failed to expand static bindings array");
+                    RegCloseKey(hKey);
+                    FreeStaticBindings();
+                    return 0;
+                }
+                
+                tStaticBindings = pTemp;
+                nCapacity = nNewCapacity;
+                LOG(5, "Expanded static bindings array to capacity %d", nCapacity);
+            }
+            
+            // 解析MAC地址并存储绑定
+            atohaddr(szKeyName, tStaticBindings[nStaticBindingCount].sMac, 6);
+            tStaticBindings[nStaticBindingCount].dwIP = dwIP;
+            
+            LOG(5, "[REG] %d. Loaded binding: MAC=%s -> IP=%s",
+                 nStaticBindingCount + 1, szKeyName, szValue);
+            
+            nStaticBindingCount++;
+        }
+    }
+    
+    RegCloseKey(hKey);
+    
+Sorting:
+    // 对静态绑定数组按IP排序，以便快速查找
+    if (nStaticBindingCount > 1)
+    {
+        qsort(tStaticBindings, nStaticBindingCount,
+              sizeof(struct StaticBinding), StaticBindingCompare);
+        LOG(5, "Sorted %d static bindings by IP address", nStaticBindingCount);
+    }
+    
+    // 打印加载的静态绑定列表摘要
+    LOG(0, "=== Summary: Loaded %d static MAC-IP bindings from %s ===",
+         nStaticBindingCount, szConfigSource);
+    return nStaticBindingCount;
+} // LoadStaticBindings
+
+/**
+ * 释放静态绑定占用的内存
+ */
+void FreeStaticBindings(void)
+{
+    if (tStaticBindings != NULL)
+    {
+        free(tStaticBindings);
+        tStaticBindings = NULL;
+    }
+    nStaticBindingCount = 0;
+    LOG(5, "Freed static bindings memory");
+} // FreeStaticBindings
 
 //Free the Lease memory
 void FreeLeases(BOOL freepool)
@@ -864,6 +1181,103 @@ return Ark<nAllocatedIP ? tFirstIP[Ark] : NULL ;
 #endif
 } // DHCPSearchByMacAddress
 
+
+/**
+ * 使用二分查找检查IP是否在静态绑定表中
+ */
+static struct StaticBinding* FindStaticBindingByIP(DWORD dwIP)
+{
+    struct StaticBinding key;
+    int low, high, mid;
+    DWORD targetIP, midIP;
+    
+    if (nStaticBindingCount == 0)
+        return NULL;
+    
+    targetIP = ntohl(dwIP);
+    
+    // 手动实现二分查找
+    low = 0;
+    high = nStaticBindingCount - 1;
+    
+    while (low <= high)
+    {
+        mid = (low + high) / 2;
+        midIP = ntohl(tStaticBindings[mid].dwIP);
+        
+        if (midIP < targetIP)
+            low = mid + 1;
+        else if (midIP > targetIP)
+            high = mid - 1;
+        else
+            return &tStaticBindings[mid];  // 找到匹配
+    }
+    
+    return NULL;  // 未找到
+}
+
+/**
+ * 检查指定的 IP 是否被某个 MAC 地址静态绑定
+ * 如果该被请求分配的 IP 已经静态绑定给其他 MAC，则返回 TRUE
+ *
+ * @param dwIP 要检查的 IP 地址（网络字节序）
+ * @param pRequestMac 请求分配这个 IP 的 MAC 地址
+ * @return TRUE 表示该 IP 被其他 MAC 静态绑定，不应该分配；FALSE 表示可以分配
+ *
+ * 修改后的版本使用内存中的静态绑定表，可以正确检测所有静态绑定，
+ * 无论该 MAC 是否已有租约记录。
+ */
+BOOL DHCP_IsIPBoundToOtherMac(DWORD dwIP, const unsigned char *pRequestMac)
+{
+    struct StaticBinding *pBinding;
+    
+    // 避免检查无效 IP
+    if (dwIP == INADDR_ANY || dwIP == INADDR_NONE)
+        return FALSE;
+    
+    LOG(12, "=== DHCP_IsIPBoundToOtherMac ===");
+    LOG(12, "Checking IP: %s", inet_ntoa(*(struct in_addr *)&dwIP));
+    LOG(12, "Requesting MAC: %s", haddrtoa((unsigned char*)pRequestMac, 6, ':'));
+    LOG(12, "Static bindings loaded: %d", nStaticBindingCount);
+    
+    // 使用静态绑定表进行快速二分查找
+    pBinding = FindStaticBindingByIP(dwIP);
+    
+    if (pBinding != NULL)
+    {
+        // IP 有静态绑定，检查是否是请求的 MAC
+        LOG(5, "*** STATIC BIND CHECK: IP %s is bound to MAC %s ***",
+             inet_ntoa(*(struct in_addr *)&dwIP),
+             haddrtoa(pBinding->sMac, 6, ':'));
+        
+        if (memcmp(pBinding->sMac, pRequestMac, 6) == 0)
+        {
+            // 绑定给请求的 MAC，可以分配
+            LOG(5, "IP %s is bound to requesting MAC %s (OK)",
+                 inet_ntoa(*(struct in_addr *)&dwIP),
+                 haddrtoa(pBinding->sMac, 6, ':'));
+            return FALSE;
+        }
+        else
+        {
+            // 绑定给其他 MAC，不能分配
+            LOG(1, "!!! STATIC BINDING CONFLICT !!!");
+            LOG(1, "IP %s is statically bound to MAC %s, "
+                    "but requested by MAC %s",
+                 inet_ntoa(*(struct in_addr *)&dwIP),
+                 haddrtoa(pBinding->sMac, 6, ':'),
+                 haddrtoa((unsigned char*)pRequestMac, 6, ':'));
+            LOG(1, "REFUSING allocation to maintain static binding.");
+            return TRUE;
+        }
+    }
+    
+    // IP 没有静态绑定，可以分配
+    LOG(12, "IP %s has no static binding, can allocate",
+         inet_ntoa(*(struct in_addr *)&dwIP));
+    LOG(12, "=== End DHCP_IsIPBoundToOtherMac ===");
+    return FALSE;
+} // DHCP_IsIPBoundToOtherMac
 
 /**
  * 清除指定 MAC 地址的所有旧分配记录
@@ -1171,3 +1585,40 @@ const char *GetBootFileByArch(unsigned char *pDhcpOptions)
    // Default: return Legacy BIOS boot file
    return sParamDHCP.szBootFile;
 } // GetBootFileByArch
+
+
+/**
+ * 根据原始 MAC 字节查询静态绑定的 IP 地址
+ *
+ * 此函数是 DHCP_StaticAssignation 的辅助函数，
+ * 用于在不需要完整 dhcp_packet 结构的情况下查询静态绑定
+ *
+ * @param pMac MAC 地址字节数组
+ * @param nMacLen MAC 地址长度
+ * @return 静态绑定的 IP 地址（如果存在），否则返回 INADDR_NONE
+ */
+DWORD DHCP_StaticAssignationByRawMac(const unsigned char *pMac, int nMacLen)
+{
+    char szIP[20];
+    
+    // 只支持以太网硬件类型（MAC 地址长度为 6）
+    if (nMacLen != 6)
+        return INADDR_NONE;
+    
+    // 从注册表或 INI 文件读取静态绑定配置
+    // 使用 MAC 地址作为键值查找对应的 IP
+    if (ReadKey(TFTPD32_DHCP_KEY,
+                haddrtoa(pMac, nMacLen, ':'),
+                szIP, sizeof(szIP),
+                REG_SZ,
+                szTftpd32IniFile))
+    {
+        LOG(5, "Static IP binding found for MAC %s: %s",
+             haddrtoa(pMac, nMacLen, ':'), szIP);
+        return inet_addr(szIP);
+    }
+    
+    LOG(12, "No static IP binding found for MAC %s",
+         haddrtoa(pMac, nMacLen, ':'));
+    return INADDR_NONE;
+} // DHCP_StaticAssignationByRawMac

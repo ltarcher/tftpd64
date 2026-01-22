@@ -65,6 +65,17 @@ struct S_DHCP_Param
 extern struct S_DHCP_Param  sParamDHCP;
 extern struct S_DHCP_Param  sGuiParamDHCP;
 
+// Static MAC-IP binding data structure
+struct StaticBinding
+{
+    DWORD dwIP;           // Bound IP address (network order)
+    unsigned char sMac[6]; // Bound MAC address
+};
+
+// Global static bindings storage
+extern struct StaticBinding *tStaticBindings;
+extern int nStaticBindingCount;
+
 // written by Cengiz Beytas, it has been rewritten by Jesus Soto
 // int FindAdapterIP(char *szIP, DWORD *pdwAdapter, DWORD *pdwFirstAdapter);// 
 // struct in_addr DlgItem2Address (HWND hWnd, int nDlgItem, const char *szDescr, BOOL bStrict);
@@ -92,6 +103,7 @@ void FreeLeases(BOOL freepool);
 struct LL_IP *DHCPSearchByIP (const struct in_addr *pAddr, BOOL* wasexpired);
 struct LL_IP *DHCPSearchByMacAddress (const unsigned char *pMac, int nMacLen);
 char *TranslateExp (const char *exp, char *to, struct in_addr ip, const char *tMac);
+int TranslateParam2Value (char *buffer, int len, const char *opt_val, struct in_addr ip, const char *tMac);
 
 //////////////
 // From ip_util.h

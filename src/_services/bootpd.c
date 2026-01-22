@@ -202,15 +202,38 @@ void DHCPDestroyItem (struct LL_IP *pCur)
 DWORD DHCP_StaticAssignation (struct dhcp_packet *pPkt)
 {
 char          szIP[20];
+const char   *szMac;
+DWORD         dwResult = INADDR_NONE;
 
-return ( pPkt->htype==HTYPE_ETHER || pPkt->htype==HTYPE_IEEE802 )
-        && pPkt->hlen==6
-        && ReadKey ( TFTPD32_DHCP_KEY, 
-                     haddrtoa(pPkt->chaddr, pPkt->hlen,':'), 
-                     szIP, sizeof szIP, 
-                     REG_SZ, 
-                     szTftpd32IniFile )
-        ?  inet_addr (szIP) : INADDR_NONE;
+    szMac = haddrtoa(pPkt->chaddr, pPkt->hlen,':');
+    
+    // 记录正在查询的 MAC 地址
+    LOG(12, "Querying static IP binding for MAC %s", szMac);
+    
+    // 检查硬件类型和 MAC 地址长度，只支持以太网（6字节 MAC）
+    if ((pPkt->htype==HTYPE_ETHER || pPkt->htype==HTYPE_IEEE802) && pPkt->hlen==6)
+    {
+        if (ReadKey ( TFTPD32_DHCP_KEY,
+                      szMac,
+                      szIP, sizeof szIP,
+                      REG_SZ,
+                      szTftpd32IniFile ))
+        {
+            dwResult = inet_addr (szIP);
+            LOG(5, "Static IP binding found: MAC %s -> IP %s", szMac, szIP);
+        }
+        else
+        {
+            LOG(12, "No static IP binding found for MAC %s", szMac);
+        }
+    }
+    else
+    {
+        LOG(12, "Ignoring static binding query for non-Ethernet device (htype=%d, hlen=%d)",
+            pPkt->htype, pPkt->hlen);
+    }
+
+return dwResult;
 
 } // DHCP_StaticAssignation
 
@@ -236,14 +259,52 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
    // 确保一个 MAC 地址只对应一个活跃的 IP 分配，避免 IP 池被占用
    if (nMacLen>=6) // Ethernet Mac address
    {
-       // 清理旧分配，并获取保留的记录数
-       int nCleaned = DHCPCleanupOldMacAllocations(pMac, nMacLen);
-       if (nCleaned > 0)
+       // 检查是否有静态绑定配置
+       DWORD dwStaticIP = DHCP_StaticAssignationByRawMac(pMac, nMacLen);
+       if (dwStaticIP != INADDR_NONE)
        {
-           LOG(12, "Cleaned %d old allocation(s) for MAC %s",
-               nCleaned, haddrtoa((unsigned char*)pMac, nMacLen, ':'));
+           // 如果有静态绑定，检查该 IP 是否被其他 MAC 占用
+           struct in_addr staticAddr;
+           staticAddr.s_addr = dwStaticIP;
+           BOOL wasexpired = FALSE;
+           struct LL_IP *pStaticIPItem = DHCPSearchByIP(&staticAddr, &wasexpired);
+           
+           if (pStaticIPItem != NULL && !wasexpired)
+           {
+               // 静态 IP 目前被另一个 MAC 占用
+               if (0 != memcmp(pStaticIPItem->sMacAddr, pMac, 6))
+               {
+                   LOG(5, "Static IP %s is currently allocated to MAC %s, "
+                           "releasing for requesting MAC %s",
+                           inet_ntoa(staticAddr),
+                           haddrtoa(pStaticIPItem->sMacAddr, 6, ':'),
+                           haddrtoa(pMac, nMacLen, ':'));
+                   
+                   // 释放被占用的 IP，让静态绑定的 MAC 能够使用
+                   DHCPDestroyItem(pStaticIPItem);
+                   pStaticIPItem = NULL;
+               }
+           }
+           
+           // 清理旧分配
+           int nCleaned = DHCPCleanupOldMacAllocations(pMac, nMacLen);
+           if (nCleaned > 0)
+           {
+               LOG(12, "Cleaned %d old allocation(s) for static MAC %s",
+                   nCleaned, haddrtoa((unsigned char*)pMac, nMacLen, ':'));
+           }
        }
-    
+       else
+       {
+           // 没有静态绑定，正常清理旧分配
+           int nCleaned = DHCPCleanupOldMacAllocations(pMac, nMacLen);
+           if (nCleaned > 0)
+           {
+               LOG(12, "Cleaned %d old allocation(s) for MAC %s",
+                   nCleaned, haddrtoa((unsigned char*)pMac, nMacLen, ':'));
+           }
+       }
+   
      // search if mac the mac address is already known
        pCurIP = DHCPSearchByMacAddress (pMac, nMacLen);
      if(pCurIP)
@@ -301,6 +362,7 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
   // First check if the pool is large enough in order to allocate a new address
    if (sParamDHCP.nPoolSize>0   &&  nAllocatedIP < sParamDHCP.nPoolSize)
    {
+       struct in_addr proposedAddr;
     // search for an "hole" in the struct or take last elem + 1
     // if an item was allocated and the first item is the first in pool
    //Don't allocate ip addresses ending in 0 or 255
@@ -309,14 +371,48 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
           for ( Ark=1 ;
                 Ark<nAllocatedIP
                &&  ntohl (tFirstIP[Ark]->dwIP.s_addr) == AddrInc(tFirstIP[Ark-1]->dwIP);
-               Ark ++ );
-           pCurIP = DHCPReallocItem (NULL, htonl (AddrInc(tFirstIP[Ark-1]->dwIP)), pMac, nMacLen);
+                Ark ++ );
+          
+          // 检查提议的 IP 是否被静态绑定给其他 MAC
+          proposedAddr.s_addr = htonl (AddrInc(tFirstIP[Ark-1]->dwIP));
+          
+          if (DHCP_IsIPBoundToOtherMac(proposedAddr.s_addr, pMac))
+          {
+              // IP 被其他 MAC 静态绑定，不分配
+              LOG(5, "Cannot allocate %s: statically bound to another MAC, skipping",
+                   inet_ntoa(proposedAddr));
+              pCurIP = NULL;
+          }
+          else
+          {
+              pCurIP = DHCPReallocItem (NULL, proposedAddr.s_addr, pMac, nMacLen);
+          }
+      }
+     else
+      {
+          // 检查起始 IP 是否被静态绑定给其他 MAC
+          proposedAddr.s_addr = inet_addr (sParamDHCP.szAddr);
+          
+          if (DHCP_IsIPBoundToOtherMac(proposedAddr.s_addr, pMac))
+          {
+              // IP 被其他 MAC 静态绑定，不分配
+              LOG(5, "Cannot allocate %s: statically bound to another MAC",
+                   inet_ntoa(proposedAddr));
+              pCurIP = NULL;
+          }
+          else
+          {
+              pCurIP = DHCPReallocItem (NULL, proposedAddr.s_addr, pMac, nMacLen);
+          }
+      }
+      
+       if (pCurIP != NULL)
+       {
+          // New address : ntohl (tFirstIP[Ark]->dwIP.s_addr) + 1
+        // it is OK if Ark has reach nAllocatedIP
+          LOG (12, "Reply with new : %s", inet_ntoa (pCurIP->dwIP));
+          return pCurIP;
        }
-      else   pCurIP = DHCPReallocItem (NULL, inet_addr (sParamDHCP.szAddr), pMac, nMacLen);
-       // New address : ntohl (tFirstIP[Ark]->dwIP.s_addr) + 1
-    // it is OK if Ark has reach nAllocatedIP
-      LOG (12, "Reply with new : %s", inet_ntoa (pCurIP->dwIP));
-    return pCurIP;
     } // new allocation
 
     // no free address, have to reuse an "old" one
@@ -1379,6 +1475,7 @@ BOOL                    bUniCast;
    } // do it eternally
 
 LogToMonitor ("DHCP thread ends here\n");
+    FreeStaticBindings();
     _endthread ();
 } // ListenDhcpMessage
 
