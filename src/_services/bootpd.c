@@ -387,7 +387,7 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
               DWORD dwPoolEnd = dwPoolStart + sParamDHCP.nPoolSize;
               
               // 从下一个IP开始，向后搜索池中的可用IP
-              DWORD dwTestIP = ntOHL(proposedAddr.s_addr) + 1;
+              DWORD dwTestIP = ntohl(proposedAddr.s_addr) + 1;
               
               while (dwTestIP < dwPoolEnd)
               {
