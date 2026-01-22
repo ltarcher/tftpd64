@@ -378,9 +378,52 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
           
           if (DHCP_IsIPBoundToOtherMac(proposedAddr.s_addr, pMac))
           {
-              // IP 被其他 MAC 静态绑定，不分配
+              // IP 被其他 MAC 静态绑定，跳过该IP，尝试池中的下一个IP
               LOG(5, "Cannot allocate %s: statically bound to another MAC, skipping",
                    inet_ntoa(proposedAddr));
+              
+              // 计算池的起始IP和结束IP
+              DWORD dwPoolStart = ntohl(inet_addr(sParamDHCP.szAddr));
+              DWORD dwPoolEnd = dwPoolStart + sParamDHCP.nPoolSize;
+              
+              // 从下一个IP开始，向后搜索池中的可用IP
+              DWORD dwTestIP = ntOHL(proposedAddr.s_addr) + 1;
+              
+              while (dwTestIP < dwPoolEnd)
+              {
+                  struct in_addr testAddr;
+                  testAddr.s_addr = htonl(dwTestIP);
+                  
+                  // 检查是否在已分配列表中
+                  BOOL alreadyAllocated = FALSE;
+                  for (int i = 0; i < nAllocatedIP; i++)
+                  {
+                      if (tFirstIP[i]->dwIP.s_addr == testAddr.s_addr)
+                      {
+                          alreadyAllocated = TRUE;
+                          break;
+                      }
+                  }
+                  
+                  // 检查是否是有效的IP地址（避免 .0 或 .255）
+                  DWORD lastOctet = dwTestIP & 0xFF;
+                  if (lastOctet == 0 || lastOctet == 255)
+                  {
+                      alreadyAllocated = TRUE;
+                  }
+                  
+                  // 如果未分配且未被静态绑定，则使用该IP
+                  if (!alreadyAllocated && !DHCP_IsIPBoundToOtherMac(testAddr.s_addr, pMac))
+                  {
+                      pCurIP = DHCPReallocItem (NULL, testAddr.s_addr, pMac, nMacLen);
+                      LOG(12, "Reply with new (skipped static-bound IP) : %s", inet_ntoa(pCurIP->dwIP));
+                      return pCurIP;
+                  }
+                  
+                  dwTestIP++;
+              }
+              
+              // 未找到可用IP
               pCurIP = NULL;
           }
           else
@@ -395,9 +438,52 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
           
           if (DHCP_IsIPBoundToOtherMac(proposedAddr.s_addr, pMac))
           {
-              // IP 被其他 MAC 静态绑定，不分配
-              LOG(5, "Cannot allocate %s: statically bound to another MAC",
+              // IP 被其他 MAC 静态绑定，跳过该IP，尝试池中的下一个IP
+              LOG(5, "Cannot allocate %s: statically bound to another MAC, skipping",
                    inet_ntoa(proposedAddr));
+              
+              // 计算池的起始IP和结束IP
+              DWORD dwPoolStart = ntohl(inet_addr(sParamDHCP.szAddr));
+              DWORD dwPoolEnd = dwPoolStart + sParamDHCP.nPoolSize;
+              
+              // 从池起始IP+1开始，向后搜索可用IP
+              DWORD dwTestIP = dwPoolStart + 1;
+              
+              while (dwTestIP < dwPoolEnd)
+              {
+                  struct in_addr testAddr;
+                  testAddr.s_addr = htonl(dwTestIP);
+                  
+                  // 检查是否在已分配列表中
+                  BOOL alreadyAllocated = FALSE;
+                  for (int i = 0; i < nAllocatedIP; i++)
+                  {
+                      if (tFirstIP[i]->dwIP.s_addr == testAddr.s_addr)
+                      {
+                          alreadyAllocated = TRUE;
+                          break;
+                      }
+                  }
+                  
+                  // 检查是否是有效的IP地址（避免 .0 或 .255）
+                  DWORD lastOctet = dwTestIP & 0xFF;
+                  if (lastOctet == 0 || lastOctet == 255)
+                  {
+                      alreadyAllocated = TRUE;
+                  }
+                  
+                  // 如果未分配且未被静态绑定，则使用该IP
+                  if (!alreadyAllocated && !DHCP_IsIPBoundToOtherMac(testAddr.s_addr, pMac))
+                  {
+                      pCurIP = DHCPReallocItem (NULL, testAddr.s_addr, pMac, nMacLen);
+                      LOG(12, "Reply with new (skipped static-bound IP) : %s", inet_ntoa(pCurIP->dwIP));
+                      return pCurIP;
+                  }
+                  
+                  dwTestIP++;
+              }
+              
+              // 未找到可用IP
               pCurIP = NULL;
           }
           else
@@ -413,7 +499,7 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
           LOG (12, "Reply with new : %s", inet_ntoa (pCurIP->dwIP));
           return pCurIP;
        }
-    } // new allocation
+   } // new allocation
 
     // no free address, have to reuse an "old" one
     // try addresses which have not been acknowledged (tAllocated+2 minutes),
