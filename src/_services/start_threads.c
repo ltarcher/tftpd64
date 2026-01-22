@@ -66,7 +66,7 @@ tThreadsConfig [] =
     "Console",       TFTPD32_CONSOLE,  TftpdConsole,          FALSE, 16384,           0,          0,     NULL,            NULL,  0,          NULL,                     TRUE,  FALSE, FALSE,
     "Registry",     TFTPD32_REGISTRY,  AsyncSaveKeyBckgProc,  FALSE,  4096,           0,          0,     NULL,            NULL,  0,          NULL,                     TRUE,  FALSE, FALSE,
 	"Scheduler",   TFTPD32_SCHEDULER,  Scheduler,             FALSE,  4096,           0,          0,     NULL,            NULL,  0,          NULL,                     TRUE,  FALSE, FALSE,
-    "DHCP",      TFTPD32_DHCP_SERVER,  ListenDhcpMessage,     FALSE,  8192,     AF_INET, SOCK_DGRAM, "bootps",     & BootPdPort, BOOTPD_PORT,NULL,                    FALSE,   TRUE,  TRUE,
+    "DHCP",      TFTPD32_DHCP_SERVER,  ListenDhcpMessage,     FALSE, 8192,     AF_INET, SOCK_DGRAM, "bootps",     & BootPdPort, BOOTPD_PORT,sSettings.szDHCPLocalIP,FALSE,   TRUE,  TRUE,
     "TFTP",      TFTPD32_TFTP_SERVER,  TftpdMain,             FALSE,  4096,   AF_UNSPEC,          0,   "tftp", & sSettings.Port, TFTP_PORT,  sSettings.szTftpLocalIP,  TRUE,   TRUE,  TRUE,
     "SNTP",      TFTPD32_SNTP_SERVER,  SntpdProc,		      FALSE,  4096,   AF_UNSPEC, SOCK_DGRAM,    "ntp",      & SntpdPort, SNTP_PORT,  "",                      FALSE,  FALSE,  TRUE,
     "DNS",       TFTPD32_DNS_SERVER,   ListenDNSMessage,      FALSE,  4096,   AF_UNSPEC, SOCK_DGRAM, "domain",        & DnsPort, DNS_PORT,   NULL,                    FALSE,  FALSE,  TRUE,
