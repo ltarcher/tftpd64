@@ -1392,11 +1392,47 @@ int Rc;
 	{
 		// parse all interfaces until match pPktInfo->ipi_ifindex
 		for ( pCurrAddresses = pAddresses ;
-				pCurrAddresses != NULL && pCurrAddresses->IfIndex!=pPktInfo->ipi_ifindex; 
+				pCurrAddresses != NULL && pCurrAddresses->IfIndex!=pPktInfo->ipi_ifindex;
 				pCurrAddresses=pCurrAddresses->Next ) ;
 		// bug found by Chris Morris
-		if (pCurrAddresses!=NULL  && pCurrAddresses->FirstUnicastAddress !=NULL) 
-			* to =  * (struct sockaddr_in *) pCurrAddresses->FirstUnicastAddress->Address.lpSockaddr;
+		// Fixed for multi-IP interfaces: traverse all unicast addresses to find matching configured IP
+		if (pCurrAddresses!=NULL  && pCurrAddresses->FirstUnicastAddress !=NULL)
+		{
+			IP_ADAPTER_UNICAST_ADDRESS *pUnicast = pCurrAddresses->FirstUnicastAddress;
+			DWORD dwConfiguredIP = inet_addr(sSettings.szDHCPLocalIP);
+			BOOL bFound = FALSE;
+			
+			LOG(12, "Searching for configured DHCP IP %s on interface %d",
+			     sSettings.szDHCPLocalIP[0] ? sSettings.szDHCPLocalIP : "(any)",
+			     pPktInfo->ipi_ifindex);
+			
+			// Traverse all IP addresses of this interface to find the configured one
+			while (pUnicast != NULL)
+			{
+				struct sockaddr_in *addr = (struct sockaddr_in *)pUnicast->Address.lpSockaddr;
+				LOG(15, "  Checking interface IP: %s", inet_ntoa(addr->sin_addr));
+				
+				// If configured IP is empty or we found a match
+				if (sSettings.szDHCPLocalIP[0]==0 ||
+					addr->sin_addr.s_addr == dwConfiguredIP)
+				{
+					*to = *addr;
+					bFound = TRUE;
+					LOG(12, "  Matched IP %s for DHCP packet", inet_ntoa(addr->sin_addr));
+					break;
+				}
+				
+				pUnicast = pUnicast->Next;
+			}
+			
+			// If no matching IP found, use first unicast address (backward compatibility)
+			if (!bFound)
+			{
+				*to = *(struct sockaddr_in *)pCurrAddresses->FirstUnicastAddress->Address.lpSockaddr;
+				LOG(1, "  Warning: No matching IP found, using first IP %s",
+				     inet_ntoa(to->sin_addr));
+			}
+		}
 		free (pAddresses);
 	}
 return BytesRecv;
