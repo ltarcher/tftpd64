@@ -332,11 +332,19 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
 
 
     // search if requested address can be granted
-	if(useprev)
+ if(useprev)
     {
-		// is the address already allocated but not renewed (or expired)
-		BOOL wasexpired=FALSE;
-		pCurIP = DHCPSearchByIP (pPreviousAddr, &wasexpired);
+  // 检查请求的 IP 是否被静态绑定给其他 MAC 地址
+  BOOL isBoundToOther = DHCP_IsIPBoundToOtherMac(pPreviousAddr->s_addr, pMac);
+  if (isBoundToOther)
+  {
+   LOG (5, "Rejecting IP %s: statically bound to another MAC", inet_ntoa(*pPreviousAddr));
+   return NULL;
+  }
+  
+  // is the address already allocated but not renewed (or expired)
+  BOOL wasexpired=FALSE;
+  pCurIP = DHCPSearchByIP (pPreviousAddr, &wasexpired);
 		if (pCurIP!=NULL)
 		{
 			//Only allocate if it's to the same address, or the lease expired,
@@ -507,17 +515,25 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
     //
    time (&tNow);
    for (Ark=0 ;   Ark<nAllocatedIP;   Ark++)
-    {
-        pCurIP = tFirstIP[Ark];
-        if (    pCurIP->tAllocated+TWO_MINUTES < tNow
-            &&  ((pCurIP->tRenewed==0) || (tNow > pCurIP->tRenewed + (sParamDHCP.nLease * 60))))
-        {
+     {
+         pCurIP = tFirstIP[Ark];
+         if (    pCurIP->tAllocated+TWO_MINUTES < tNow
+             &&  ((pCurIP->tRenewed==0) || (tNow > pCurIP->tRenewed + (sParamDHCP.nLease * 60))))
+         {
+               // Check if the IP is statically bound to another MAC
+               if (DHCP_IsIPBoundToOtherMac(pCurIP->dwIP.s_addr, pMac))
+               {
+                   LOG(5, "Cannot reuse %s: statically bound to another MAC",
+                        inet_ntoa(pCurIP->dwIP));
+                   continue;  // Skip this IP and try the next one
+               }
+               
                pCurIP = DHCPReallocItem (pCurIP, pCurIP->dwIP.s_addr, pMac, nMacLen);
              LOG (12, "Reply with reuse : %s", inet_ntoa (pCurIP->dwIP));
-                return pCurIP;
-        }
+                 return pCurIP;
+         }
 
-    } // reuse an unacknowledged address
+     } // reuse an unacknowledged address
 
 /* Since we are replacing holes, unacked, and expired addresses, all addresses are currently used
    // search for the oldest one (use tAllocated and tRenewed)

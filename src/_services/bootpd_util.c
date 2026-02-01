@@ -1246,27 +1246,31 @@ BOOL DHCP_IsIPBoundToOtherMac(DWORD dwIP, const unsigned char *pRequestMac)
     if (pBinding != NULL)
     {
         // IP 有静态绑定，检查是否是请求的 MAC
+        char szBindMac[32];
+        haddrtoa_ex(pBinding->sMac, 6, ':', szBindMac, sizeof(szBindMac));
         LOG(5, "*** STATIC BIND CHECK: IP %s is bound to MAC %s ***",
              inet_ntoa(*(struct in_addr *)&dwIP),
-             haddrtoa(pBinding->sMac, 6, ':'));
+             szBindMac);
         
         if (memcmp(pBinding->sMac, pRequestMac, 6) == 0)
         {
             // 绑定给请求的 MAC，可以分配
             LOG(5, "IP %s is bound to requesting MAC %s (OK)",
                  inet_ntoa(*(struct in_addr *)&dwIP),
-                 haddrtoa(pBinding->sMac, 6, ':'));
+                 szBindMac);
             return FALSE;
         }
         else
         {
             // 绑定给其他 MAC，不能分配
+            char szReqMac[32];
+            haddrtoa_ex((unsigned char*)pRequestMac, 6, ':', szReqMac, sizeof(szReqMac));
             LOG(1, "!!! STATIC BINDING CONFLICT !!!");
             LOG(1, "IP %s is statically bound to MAC %s, "
                     "but requested by MAC %s",
                  inet_ntoa(*(struct in_addr *)&dwIP),
-                 haddrtoa(pBinding->sMac, 6, ':'),
-                 haddrtoa((unsigned char*)pRequestMac, 6, ':'));
+                 szBindMac,
+                 szReqMac);
             LOG(1, "REFUSING allocation to maintain static binding.");
             return TRUE;
         }

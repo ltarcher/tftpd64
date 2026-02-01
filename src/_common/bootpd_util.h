@@ -108,6 +108,7 @@ int TranslateParam2Value (char *buffer, int len, const char *opt_val, struct in_
 //////////////
 // From ip_util.h
 char * haddrtoa(const unsigned char *haddr, int hlen, char cSep);  //A few decls so we can use these here
+char * haddrtoa_ex(const unsigned char *haddr, int hlen, char cSep, char *output, int outlen);  // 安全版本，使用提供的缓冲区
 void atohaddr(const unsigned char *addrstr, unsigned char* haddr, int haddrlen);
 char* timetoa(time_t t);
 time_t atotime(char* str);

@@ -94,6 +94,31 @@ return (struct in_addr *) ( bExact ? NULL : (Ark>0 ? pHostEntry->h_addr_list[0] 
 
 
 #define MAXHADDRLEN 16
+
+/**
+ * 包装 haddrtoa 函数：提供输出缓冲区参数
+ * 避免静态缓冲区重用问题
+ */
+char * haddrtoa_ex(const unsigned char *haddr, int hlen, char cSep, char *output, int outlen)
+{
+    char *bufptr = output;
+    int remaining = outlen;
+    
+    if (hlen > MAXHADDRLEN)
+        hlen = MAXHADDRLEN;
+    
+    while (hlen > 0 && remaining > 1) {
+        wsprintf(bufptr, "%02X%c", (unsigned) (*haddr++ & 0xFF), cSep);
+        bufptr += 3;
+        remaining -= 3;
+        hlen--;
+    }
+    if (remaining > 0) {
+        *bufptr++ = '\0';
+    }
+    return output;
+}
+
 char * haddrtoa(const unsigned char *haddr, int hlen, char cSep)
 {
 static char haddrbuf[3 * MAXHADDRLEN + 1];
