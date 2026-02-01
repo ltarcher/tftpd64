@@ -367,6 +367,18 @@ int useprev = (pPreviousAddr->s_addr != INADDR_ANY) && (AddrFitsPool(pPreviousAd
    } // Requested address asked
 
   // A new IP address should be allocated :
+  // Check if non-bound clients can get IP
+  // Rule: If total static bindings >= PoolSize, only bound clients can get IP
+  if (sParamDHCP.nPoolSize > 0)
+  {
+      // Non-bound clients can only get IP if total static bindings < PoolSize
+      if (nStaticBindingCount >= sParamDHCP.nPoolSize)
+      {
+          LOG(5, "Static bindings (%d) >= PoolSize (%d), cannot allocate to non-bound client",
+               nStaticBindingCount, sParamDHCP.nPoolSize);
+          return NULL;
+      }
+  }
   // First check if the pool is large enough in order to allocate a new address
    if (sParamDHCP.nPoolSize>0   &&  nAllocatedIP < sParamDHCP.nPoolSize)
    {
