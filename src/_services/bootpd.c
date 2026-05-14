@@ -735,12 +735,16 @@ static struct S_DhcpOptions sDhcpOpt [] =       // 0 for unspecified
      case DHO_DHCP_MESSAGE_TYPE       :  * pOpt = (unsigned char) nDhcpType ; break ; 
      case DHO_LOG_SERVERS             :  // fallthrough
      case DHO_DHCP_SERVER_IDENTIFIER  :  * (DWORD *) pOpt = pNearest->s_addr; break ;
-	 case DHO_TFTP_SERVER             :  
-                  *pOpt++ = DHO_TFTP_SERVER;
-				  *pOpt   = lstrlen (sSettings.szTftpLocalIP[0]!=0 ? sSettings.szTftpLocalIP : inet_ntoa (* pNearest) );
-                   memcpy (pOpt+1, sSettings.szTftpLocalIP[0]!=0 ? sSettings.szTftpLocalIP : inet_ntoa (* pNearest), *pOpt);
-                   pOpt += 1+*pOpt; 
-				   break;
+	 case DHO_TFTP_SERVER             :
+				  {
+				      const char *szTftpServer = (sSettings.szTftpLocalIP[0]!=0) ? sSettings.szTftpLocalIP : inet_ntoa(*pNearest);
+				      size_t nLen = lstrlen(szTftpServer);
+				      *pOpt++ = DHO_TFTP_SERVER;  // Option type
+				      *pOpt++ = (unsigned char)nLen;  // Option length
+				      memcpy(pOpt, szTftpServer, nLen);  // Option data
+				      pOpt += nLen;
+				  }
+				  break;
 
      case DHO_SUBNET_MASK             :  * (DWORD *) pOpt = inet_addr(sParamDHCP.szMask); break ;
 //       case DHO_ROUTERS                 :  * (DWORD *) pOpt = (sParamDHCP.dwGateway.s_addr == 0xffffffff ? pDhcpPkt->yiaddr.s_addr : sParamDHCP.dwGateway.s_addr); break ;
