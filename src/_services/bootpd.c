@@ -689,12 +689,31 @@ static struct S_DhcpOptions sDhcpOpt [] =       // 0 for unspecified
 	*(DWORD*)(pDhcpPkt->options) = * (DWORD*) DHCP_OPTIONS_COOKIE;
 
 	// pNearest points on the "good" LAN interface
-//   pNearest = FindNearestServerAddress (&pDhcpPkt->yiaddr, & sParamDHCP.dwMask, FALSE);
-   in_Aux.s_addr=inet_addr(sParamDHCP.szMask);
-   pNearest = FindNearestServerAddress (&pDhcpPkt->yiaddr, & in_Aux, TRUE);
-   // from Philip Taff : choose the receiving interface instead of a loopback
-   if (!pNearest) 
-       pNearest = &(receivingAddress->sin_addr);
+	// Priority: 1. Configured DHCP Local IP, 2. Receiving interface, 3. Find nearest matching subnet
+	if (sSettings.szDHCPLocalIP[0] != 0)
+	{
+	    // Use configured DHCP local IP
+	    static struct in_addr configuredAddr;
+	    configuredAddr.s_addr = inet_addr(sSettings.szDHCPLocalIP);
+	    pNearest = &configuredAddr;
+	    LOG(12, "Using configured DHCP IP: %s", sSettings.szDHCPLocalIP);
+	}
+	else
+	{
+	    // Use receiving interface as first choice for multi-NIC scenarios
+	    pNearest = &(receivingAddress->sin_addr);
+	    LOG(12, "Using receiving interface IP: %s", inet_ntoa(*pNearest));
+
+	    // Verify that receiving interface is on correct subnet
+	    in_Aux.s_addr = inet_addr(sParamDHCP.szMask);
+	    struct in_addr *pMatch = FindNearestServerAddress(&pDhcpPkt->yiaddr, &in_Aux, TRUE);
+	    if (pMatch && pMatch->s_addr != pNearest->s_addr)
+	    {
+	        LOG(12, "Receiving interface %s not in DHCP pool subnet, using matched IP: %s",
+	            inet_ntoa(*pNearest), inet_ntoa(*pMatch));
+	        pNearest = pMatch;
+	    }
+	}
   
    //HACK -- If we are the bootp server, we are also the tftpserver
    if (sSettings.uServices & TFTPD32_TFTP_SERVER) 
