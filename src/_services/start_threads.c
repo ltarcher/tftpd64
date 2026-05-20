@@ -277,7 +277,8 @@ return uServices;
 static int StartSingleWorkerThread (int Ark)
 {
    if (tThreads [Ark].gRunning)  return 0;
-	   // first open socket
+   LogToMonitor ("Starting service %s", tThreadsConfig[Ark].name);
+     // first open socket
    if (  tThreadsConfig[Ark].type >= SOCK_STREAM )
    {
        tThreads [Ark].gRunning  = FALSE;
@@ -288,51 +289,61 @@ static int StartSingleWorkerThread (int Ark)
                                               * tThreadsConfig[Ark].def_port,
                                                 tThreadsConfig[Ark].rfc_port,
                                                 tThreadsConfig[Ark].sz_interface );
-	   // on error try next thread
-       if ( tThreads[Ark].skt  == INVALID_SOCKET ) return FALSE;
+     // on error try next thread
+       if ( tThreads[Ark].skt  == INVALID_SOCKET )
+       {
+           LogToMonitor ("FAILED to bind socket for %s (error %d)", tThreadsConfig[Ark].name, WSAGetLastError());
+           return FALSE;
+       }
+       LogToMonitor ("Socket bound for %s, skt=%d", tThreadsConfig[Ark].name, tThreads[Ark].skt);
    }
    else tThreads[Ark].skt = INVALID_SOCKET ;
 
    // Create the wake up event
    if (tThreadsConfig [Ark].wake_up_by_ev )
    {
-		tThreads [Ark].hEv  = CreateEvent ( NULL, tThreadsConfig [Ark].manual_event, FALSE, NULL );
-		if ( tThreads [Ark].hEv == INVALID_HANDLE_VALUE )
-		{
-			FreeThreadResources (Ark);
-			return FALSE;
-		}
+  tThreads [Ark].hEv  = CreateEvent ( NULL, tThreadsConfig [Ark].manual_event, FALSE, NULL );
+  if ( tThreads [Ark].hEv == INVALID_HANDLE_VALUE )
+  {
+   LogToMonitor ("FAILED to create event for %s (error %d)", tThreadsConfig[Ark].name, GetLastError());
+   FreeThreadResources (Ark);
+   return FALSE;
+  }
    }
    else tThreads [Ark].hEv = INVALID_HANDLE_VALUE ;
    
 
    tThreads[Ark].bSoftReset = FALSE;
 
+   LogToMonitor ("Creating thread for %s...", tThreadsConfig[Ark].name);
    // now start the thread
    tThreads [Ark].tTh  = (HANDLE) _beginthread ( tThreadsConfig [Ark].thread_proc,
                                                  tThreadsConfig [Ark].stack_size,
                                                  NULL );
    if (tThreads [Ark].tTh == INVALID_HANDLE_VALUE)
    {
-		FreeThreadResources (Ark);
-		return FALSE;
+  LogToMonitor ("FAILED to create thread for %s (error %d)", tThreadsConfig[Ark].name, GetLastError());
+  FreeThreadResources (Ark);
+  return FALSE;
    }
    else
    {
-	   // all resources have been allocated --> status OK
-	   tThreads [Ark].gRunning  = TRUE;
-	   if (tThreadsConfig [Ark].gui)
-	   {
-		struct S_Chg_Service chgmsg;
-	   // change display : ie add its tab in the GUI
-		   chgmsg.service = tThreadsConfig [Ark].serv_mask;
-		   chgmsg.status = SERVICE_RUNNING;
-   		   SendMsgRequest (   C_CHG_SERVICE, 
-  							  & chgmsg, 						
-							  sizeof chgmsg,
-							  FALSE,	  	    // don't block thread until msg sent
-							  FALSE );		// if no GUI return
-	   } // tell the gui a new service is running
+    // all resources have been allocated --> status OK
+    tThreads [Ark].gRunning  = TRUE;
+    LogToMonitor ("Thread for %s started successfully (handle=%d, skt=%d)",
+                  tThreadsConfig[Ark].name, tThreads[Ark].tTh, tThreads[Ark].skt);
+    if (tThreadsConfig [Ark].gui)
+    {
+  struct S_Chg_Service chgmsg;
+    // change display : ie add its tab in the GUI
+     chgmsg.service = tThreadsConfig [Ark].serv_mask;
+     chgmsg.status = SERVICE_RUNNING;
+   		   SendMsgRequest (   C_CHG_SERVICE,
+   						  & chgmsg,
+   				  sizeof chgmsg,
+   				  FALSE,	  	    // don't block thread until msg sent
+   				  FALSE );		// if no GUI return
+    } // tell the gui a new service is running
    } // service correctly started
    if (Ark>TH_SCHEDULER)   SetEvent ( tThreads[TH_SCHEDULER].hEv );
 return TRUE;

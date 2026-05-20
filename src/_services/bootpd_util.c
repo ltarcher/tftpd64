@@ -333,39 +333,54 @@ int DHCPReadConfig ( )
 int   Ark;
 char szBuf[128];
 
+   LogToMonitor ("DHCPReadConfig: starting...");
    memset (& sParamDHCP, 0, sizeof sParamDHCP);
    sParamDHCP.nLease = DHCP_DEFAULT_LEASE_TIME;
 
+   LogToMonitor ("DHCPReadConfig: reading main entries...");
    for (Ark=0 ; Ark<SizeOfTab (tDHCPd32Entry) ; Ark++)
-        ReadKey (  TFTPD32_DHCP_KEY, 
+        ReadKey (  TFTPD32_DHCP_KEY,
                    tDHCPd32Entry [Ark].szEntry,
                    tDHCPd32Entry [Ark].pValue,
                    tDHCPd32Entry [Ark].nBufSize,
                    tDHCPd32Entry [Ark].nType,
                    szTftpd32IniFile );
     // custom items
+   LogToMonitor ("DHCPReadConfig: reading custom items...");
    for (Ark=0 ; Ark < SizeOfTab (sParamDHCP.t) ; Ark++)
    {
       wsprintf (szBuf, "%s%d", KEY_DHCP_USER_OPTION_NB, Ark+1);
-      ReadKey  (TFTPD32_DHCP_KEY, szBuf, & sParamDHCP.t[Ark].nAddOption, 
+      ReadKey  (TFTPD32_DHCP_KEY, szBuf, & sParamDHCP.t[Ark].nAddOption,
                 sizeof sParamDHCP.t[Ark].nAddOption, REG_DWORD, szTftpd32IniFile);
 
        wsprintf (szBuf, "%s%d", KEY_DHCP_USER_OPTION_VALUE, Ark+1);
-       ReadKey  (TFTPD32_DHCP_KEY,  szBuf, sParamDHCP.t[Ark].szAddOption, 
+       ReadKey  (TFTPD32_DHCP_KEY,  szBuf, sParamDHCP.t[Ark].szAddOption,
                  sizeof sParamDHCP.t[Ark].szAddOption, REG_SZ, szTftpd32IniFile);
    }
 
+   LogToMonitor ("DHCPReadConfig: PoolSize=%d, Addr=%s", sParamDHCP.nPoolSize, sParamDHCP.szAddr);
    if ( sParamDHCP.nPoolSize!=0 )
    {
 	  tFirstIP = malloc (sParamDHCP.nPoolSize * sizeof *tFirstIP[0]) ;
-	  tMAC = malloc (sParamDHCP.nPoolSize * sizeof *tMAC[0]) ; 
-	  if (tFirstIP == NULL  ||  tMAC == NULL ) 
+	  tMAC = malloc (sParamDHCP.nPoolSize * sizeof *tMAC[0]) ;
+	  if (tFirstIP == NULL  ||  tMAC == NULL )
 	   {
 			SVC_ERROR ("Can not allocate memory");
+			LogToMonitor ("DHCPReadConfig: malloc FAILED");
 			return FALSE;
 	   }
+	   LogToMonitor ("DHCPReadConfig: calling LoadLeases...");
 	   LoadLeases ();
-	   LoadStaticBindings ();
+	   LogToMonitor ("DHCPReadConfig: calling LoadStaticBindings...");
+	   __try {
+	       LoadStaticBindings ();
+	   } __except (EXCEPTION_EXECUTE_HANDLER) {
+	       DWORD exc_code = GetExceptionCode();
+	       LogToMonitor ("DHCPReadConfig: !!! LoadStaticBindings CRASHED (exception 0x%08X) !!!", exc_code);
+	       LOG (0, "DHCPReadConfig: !!! LoadStaticBindings CRASHED (exception 0x%08X) !!!", exc_code);
+	       FreeStaticBindings();  // clean up partial state
+	   }
+	   LogToMonitor ("DHCPReadConfig: LoadStaticBindings returned");
 	   }
 	
 	   if (sParamDHCP.nLease==0)
@@ -380,6 +395,7 @@ char szBuf[128];
       LOG (0, "WINS server copied from DNS servers");
    }
 
+   LogToMonitor ("DHCPReadConfig: completed successfully");
 return TRUE;
 } // DHCPReadConfig
 
@@ -831,18 +847,21 @@ DWORD LoadStaticBindings(void)
     DWORD dwResult;
     char szKeyName[256];
     char szValue[64];
-    char *szConfigSource;
+    char *szConfigSource = "unknown";
     DWORD dwKeyNameSize, dwValueSize, dwValueType;
     DWORD dwIP;
     int nCapacity = 0;
     int i;
     
+    LogToMonitor ("LoadStaticBindings: entered");
     LOG(10, "=== Loading static MAC-IP bindings from storage ===");
     
     // 首先释放旧的绑定（如果存在）
     FreeStaticBindings();
+    LogToMonitor ("LoadStaticBindings: FreeStaticBindings done, checking config source...");
     
     // 确定配置存储介质
+    LogToMonitor ("LoadStaticBindings: szTftpd32IniFile[0]=%d", szTftpd32IniFile[0]);
     if (szTftpd32IniFile[0] != 0)
     {
         // 从 INI 文件加载静态绑定
@@ -853,7 +872,10 @@ DWORD LoadStaticBindings(void)
         char *pKey;
         const char *pLastBackslash;
         
+        LogToMonitor ("LoadStaticBindings: INI file path: %s", szTftpd32IniFile);
+        
         // 从 TFTPD32_DHCP_KEY 中提取最后的 section 名称
+        LogToMonitor ("LoadStaticBindings: extracting section from '%s'", TFTPD32_DHCP_KEY);
         pLastBackslash = strrchr(TFTPD32_DHCP_KEY, '\\');
         if (pLastBackslash != NULL)
         {
@@ -863,21 +885,22 @@ DWORD LoadStaticBindings(void)
         {
             lstrcpyn(szSection, TFTPD32_DHCP_KEY, sizeof(szSection));
         }
+        LogToMonitor ("LoadStaticBindings: section='%s'", szSection);
         
         szConfigSource = szTftpd32IniFile;
-        LOG(10, "Configuration source: INI file %s, Section: %s", szConfigSource, szSection);
         
         // 使用 GetPrivateProfileStringA 枚举 INI 文件中的所有键
+        LogToMonitor ("LoadStaticBindings: calling GetPrivateProfileStringA...");
         dwResult = GetPrivateProfileStringA(szSection, NULL, NULL, szAllKeys, sizeof(szAllKeys), szTftpd32IniFile);
+        LogToMonitor ("LoadStaticBindings: GetPrivateProfileStringA returned %d", dwResult);
         
         if (dwResult == 0 || szAllKeys[0] == '\0')
         {
-            LOG(10, "No keys found in INI section [%s]", szSection);
-            // 尝试从注册表读取
+            LogToMonitor ("LoadStaticBindings: no keys in INI section, trying registry");
             goto TryRegistry;
         }
         
-        LOG(10, "Found %d bytes of key names in section [%s]", dwResult, szSection);
+        LogToMonitor ("LoadStaticBindings: found %d bytes of keys, allocating array", dwResult);
         
         // 遍历所有键名（由空字符分隔，以双空字符结尾）
         nStaticBindingCount = 0;
@@ -886,9 +909,10 @@ DWORD LoadStaticBindings(void)
         
         if (tStaticBindings == NULL)
         {
-            LOG(1, "Failed to allocate memory for static bindings");
+            LogToMonitor ("LoadStaticBindings: calloc FAILED");
             return 0;
         }
+        LogToMonitor ("LoadStaticBindings: array allocated, iterating keys...");
         
         for (pKey = szAllKeys; *pKey != '\0'; pKey += strlen(pKey) + 1)
         {
@@ -939,7 +963,7 @@ DWORD LoadStaticBindings(void)
             atohaddr(pKey, tStaticBindings[nStaticBindingCount].sMac, 6);
             tStaticBindings[nStaticBindingCount].dwIP = dwIP;
             
-            LOG(5, "[INI] %d. Loaded binding: MAC=%s -> IP=%s",
+            LogToMonitor ("LoadStaticBindings: [INI] binding %d: MAC=%s -> IP=%s",
                  nStaticBindingCount + 1, pKey, szValue);
             
             nStaticBindingCount++;
@@ -948,28 +972,32 @@ DWORD LoadStaticBindings(void)
         // 打印已加载的绑定摘要
         if (nStaticBindingCount > 0)
         {
-            LOG(0, "=== Summary: Loaded %d static MAC-IP bindings from INI file ===", nStaticBindingCount);
+            LogToMonitor ("LoadStaticBindings: loaded %d bindings from INI, going to sort", nStaticBindingCount);
             goto Sorting;
         }
         else
         {
-            LOG(0, "No static bindings found in INI file, trying registry...");
+            LogToMonitor ("LoadStaticBindings: no MAC bindings in INI, trying registry");
             FreeStaticBindings();
         }
+    }
+    else
+    {
+        LogToMonitor ("LoadStaticBindings: no INI file, trying registry");
     }
     
     // 从注册表加载静态绑定（INI文件为空或不存在时）
 TryRegistry:
     szConfigSource = "Registry";
-    LOG(10, "Loading static bindings from Registry: %s", TFTPD32_DHCP_KEY);
+    LogToMonitor ("LoadStaticBindings: trying registry '%s'", TFTPD32_DHCP_KEY);
     
     // 打开DHCP注册表键
     dwResult = RegOpenKeyExA(HKEY_LOCAL_MACHINE, TFTPD32_DHCP_KEY, 0, KEY_READ, &hKey);
+    LogToMonitor ("LoadStaticBindings: RegOpenKeyExA returned %d", dwResult);
     
     if (dwResult != ERROR_SUCCESS)
     {
-        LOG(10, "Failed to open DHCP registry key for static bindings (error %d)", dwResult);
-        LOG(0, "No configuration source found for static bindings");
+        LogToMonitor ("LoadStaticBindings: registry key not found, no static bindings loaded");
         return 0;
     }
     
@@ -979,24 +1007,28 @@ TryRegistry:
     
     if (tStaticBindings == NULL)
     {
-        LOG(1, "Failed to allocate memory for static bindings");
+        LogToMonitor ("LoadStaticBindings: calloc FAILED for registry path");
         RegCloseKey(hKey);
         return 0;
     }
-    
-    LOG(10, "Enumerating registry values in: %s", TFTPD32_DHCP_KEY);
+    LogToMonitor ("LoadStaticBindings: registry array allocated, enumerating values...");
     
     // 枚举所有注册表值，寻找MAC地址格式的键
+    // 注意：使用独立的 dwIndex 作为枚举索引，不能用 nStaticBindingCount
+    // 因为 nStaticBindingCount 只在找到 MAC 格式键时递增
     nStaticBindingCount = 0;
     dwResult = ERROR_SUCCESS;
+    {
+    DWORD dwIndex = 0;
     while (dwResult == ERROR_SUCCESS)
     {
         dwKeyNameSize = sizeof(szKeyName) - 1;
         dwValueSize = sizeof(szValue) - 1;
         dwValueType = REG_SZ;
         
-        dwResult = RegEnumValueA(hKey, nStaticBindingCount, szKeyName, &dwKeyNameSize,
+        dwResult = RegEnumValueA(hKey, dwIndex, szKeyName, &dwKeyNameSize,
                                 NULL, &dwValueType, (LPBYTE)szValue, &dwValueSize);
+        dwIndex++;
         
         if (dwResult == ERROR_NO_MORE_ITEMS)
         {
@@ -1052,27 +1084,27 @@ TryRegistry:
             atohaddr(szKeyName, tStaticBindings[nStaticBindingCount].sMac, 6);
             tStaticBindings[nStaticBindingCount].dwIP = dwIP;
             
-            LOG(5, "[REG] %d. Loaded binding: MAC=%s -> IP=%s",
+            LogToMonitor ("LoadStaticBindings: [REG] binding %d: MAC=%s -> IP=%s",
                  nStaticBindingCount + 1, szKeyName, szValue);
             
             nStaticBindingCount++;
         }
     }
+    } // end of dwIndex block
     
     RegCloseKey(hKey);
+    LogToMonitor ("LoadStaticBindings: registry enumeration done, found %d bindings", nStaticBindingCount);
     
 Sorting:
     // 对静态绑定数组按IP排序，以便快速查找
+    LogToMonitor ("LoadStaticBindings: sorting %d bindings...", nStaticBindingCount);
     if (nStaticBindingCount > 1)
     {
         qsort(tStaticBindings, nStaticBindingCount,
               sizeof(struct StaticBinding), StaticBindingCompare);
-        LOG(5, "Sorted %d static bindings by IP address", nStaticBindingCount);
     }
     
-    // 打印加载的静态绑定列表摘要
-    LOG(0, "=== Summary: Loaded %d static MAC-IP bindings from %s ===",
-         nStaticBindingCount, szConfigSource);
+    LogToMonitor ("LoadStaticBindings: completed, %d bindings from %s", nStaticBindingCount, szConfigSource);
     return nStaticBindingCount;
 } // LoadStaticBindings
 

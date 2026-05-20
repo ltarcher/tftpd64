@@ -1410,17 +1410,31 @@ int Rc;
 	Rc = WSARecvMsg  (skt, &wsaMsg, &BytesRecv, NULL, NULL);
 	if (Rc == SOCKET_ERROR) {
 		Rc = WSAGetLastError();
+		LogToMonitor ("DHCP: WSARecvMsg failed, error %d", Rc);
+		LOG (0, "DHCP: WSARecvMsg failed, error %d", Rc);
 		return -1;
 	}
 
 	// ok WSARecvMsg has succeeded, IP_PKINFO should be available in the headers
 	pMsgHdr = WSA_CMSG_FIRSTHDR(&wsaMsg);
-	for( pMsgHdr = WSA_CMSG_FIRSTHDR( &wsaMsg ); 
-		 pMsgHdr!=NULL  &&  pMsgHdr->cmsg_type!=IP_PKTINFO; 
+	for( pMsgHdr = WSA_CMSG_FIRSTHDR( &wsaMsg );
+		 pMsgHdr!=NULL  &&  pMsgHdr->cmsg_type!=IP_PKTINFO;
 		 pMsgHdr = WSA_CMSG_NXTHDR( &wsaMsg, pMsgHdr  ) )	;
 
 	// not found (?)
-	if (pMsgHdr==NULL)  return BytesRecv;
+	if (pMsgHdr==NULL)
+	{
+		LogToMonitor ("DHCP: WSARecvMsg succeeded but IP_PKTINFO not found, falling back to getsockname");
+		LOG (0, "DHCP: WSARecvMsg succeeded but IP_PKTINFO not found, falling back to getsockname");
+		// Fallback: use getsockname to get the local bound address
+		int toLen = sizeof *to;
+		if (getsockname(skt, (struct sockaddr *)to, &toLen) != 0)
+		{
+			LogToMonitor ("DHCP: getsockname fallback failed, error %d", WSAGetLastError());
+			LOG (0, "DHCP: getsockname fallback failed, error %d", WSAGetLastError());
+		}
+		return BytesRecv;
+	}
 
 	pPktInfo = (IN_PKTINFO *)WSA_CMSG_DATA(pMsgHdr);
 
@@ -1503,9 +1517,16 @@ struct S_WorkerParam   *pParam = (struct S_WorkerParam *) lpVoid;
 struct sockaddr_in      SockFrom, SockTo;
 int                     True=TRUE, nFromLen = sizeof SockFrom;
 BOOL                    bUniCast;
+int                     nRecvMethod;
 
+    LogToMonitor ("DHCP: Thread started successfully");
+    LOG (0, "DHCP: Thread started successfully");
+    LogToMonitor ("DHCP: Calling DHCPReadConfig...");
     DHCPReadConfig ();
-	tThreads[TH_DHCP].bInit = TRUE;		// inits OK
+    LogToMonitor ("DHCP: DHCPReadConfig returned, setting bInit=TRUE");
+ tThreads[TH_DHCP].bInit = TRUE;		// inits OK
+    LogToMonitor ("DHCP: Socket handle=%d, gRunning=%d", tThreads[TH_DHCP].skt, tThreads[TH_DHCP].gRunning);
+    LOG (0, "DHCP: Socket handle=%d, gRunning=%d", tThreads[TH_DHCP].skt, tThreads[TH_DHCP].gRunning);
 
 	// let the GUI start
     Sleep (1000);
@@ -1542,37 +1563,63 @@ BOOL                    bUniCast;
 		Rc = WSAGetLastError ();
     }
 
+   LogToMonitor ("DHCP: Entering main receive loop");
+   LOG (0, "DHCP: Entering main receive loop");
+
    while ( tThreads[TH_DHCP].gRunning )
    {
         // send leases to GUI
         Dhcp_Send_Leases (tFirstIP, nAllocatedIP);
         memset (& sDhcpPkt, 0, sizeof sDhcpPkt);
+        memset (& SockFrom, 0, sizeof SockFrom);
+        memset (& SockTo, 0, sizeof SockTo);
+        nRecvMethod = 0;
 
-		// try to receive request and get incoming interface (need at last XP or windows server 2003)
-		Rc = SktRcvAndGetAddrOfIncomingIf (tThreads[TH_DHCP].skt, 
-											(char *) & sDhcpPkt,
-											sizeof sDhcpPkt,
-											& SockFrom,
-											& SockTo );
-		// 2nd chance for old OS, try recvfrom
-		// should succeed if host is NOT multi-homed
-		if (Rc==-1  && GetLastError()==WSAVERNOTSUPPORTED)
-		{
-			Rc = recvfrom ( tThreads[TH_DHCP].skt,
-							(char *) & sDhcpPkt,
-							sizeof sDhcpPkt,
-							0,
-							(struct sockaddr *) & SockFrom,
-							& nFromLen);
-		}
-		
-		// recv error
+  // try to receive request and get incoming interface (need at last XP or windows server 2003)
+  Rc = SktRcvAndGetAddrOfIncomingIf (tThreads[TH_DHCP].skt,
+   								(char *) & sDhcpPkt,
+   								sizeof sDhcpPkt,
+   								& SockFrom,
+   								& SockTo );
+  nRecvMethod = 1;  // WSARecvMsg
+  // 2nd chance for old OS, try recvfrom
+  // should succeed if host is NOT multi-homed
+  if (Rc==-1)
+  {
+   Rc = recvfrom ( tThreads[TH_DHCP].skt,
+   				(char *) & sDhcpPkt,
+   				sizeof sDhcpPkt,
+   				0,
+   				(struct sockaddr *) & SockFrom,
+   				& nFromLen);
+   nRecvMethod = 2;  // recvfrom fallback
+
+   // BUG FIX: recvfrom does not populate SockTo (the receiving interface address).
+   // Use getsockname as fallback to get the bound local address.
+   if (Rc > 0)
+   {
+   	int toLen = sizeof SockTo;
+   	if (getsockname(tThreads[TH_DHCP].skt, (struct sockaddr *)&SockTo, &toLen) != 0)
+   	{
+   		LogToMonitor ("DHCP: recvfrom fallback getsockname failed, error %d", WSAGetLastError());
+   		LOG (0, "DHCP: recvfrom fallback getsockname failed, error %d", WSAGetLastError());
+   	}
+   	else
+   	{
+   		LogToMonitor ("DHCP: recvfrom fallback, SockTo=%s via getsockname", inet_ntoa(SockTo.sin_addr));
+   		LOG (0, "DHCP: recvfrom fallback, SockTo=%s via getsockname", inet_ntoa(SockTo.sin_addr));
+   	}
+   }
+  }
+  
+  // recv error
       // since Tftpd32 sends broadcasts, it receives its own message, just ignore it
         if (Rc < 0)
         {
              if (GetLastError () != WSAECONNRESET)
               {
-                 LOG (1, "Recv error %d", GetLastError ());
+                 LogToMonitor ("Recv error %d (method=%d)", GetLastError (), nRecvMethod);
+                 LOG (0, "Recv error %d (method=%d)", GetLastError (), nRecvMethod);
                  Sleep (500);
               }
               continue;
@@ -1582,22 +1629,26 @@ BOOL                    bUniCast;
         // If all bootP fields have been read
         if (Rc < offsetof ( struct dhcp_packet, options ))
         {
-           LOG (5, "Message truncated (length was %d)", Rc);
+           LOG (5, "Message truncated (length was %d, method=%d)", Rc, nRecvMethod);
            if ( tThreads[TH_DHCP].gRunning ) Sleep (500);
            continue;
         }
 
-		// receive on a unbound interface
-		if (    sSettings.szDHCPLocalIP[0]!=0 
-			&&  SockTo.sin_addr.s_addr != inet_addr (sSettings.szDHCPLocalIP))
+        LOG (5, "DHCP: Received %d bytes from %s, SockTo=%s (method=%d)",
+             Rc, inet_ntoa (SockFrom.sin_addr), inet_ntoa (SockTo.sin_addr), nRecvMethod);
+
+  // receive on a unbound interface
+  if (    sSettings.szDHCPLocalIP[0]!=0
+   &&  SockTo.sin_addr.s_addr != inet_addr (sSettings.szDHCPLocalIP))
         {
-           LOG (1, "Message received on an unbound interface (IP %s)", inet_ntoa (SockTo.sin_addr));
+           LOG (1, "Message received on an unbound interface (SockTo=%s, expected=%s)",
+                inet_ntoa (SockTo.sin_addr), sSettings.szDHCPLocalIP);
            Sleep (10);
            continue;
         }
 
         // if pool is empty and MAC address not statically assigned : ignore request
-        if (    sParamDHCP.nPoolSize == 0  
+        if (    sParamDHCP.nPoolSize == 0
             &&  DHCP_StaticAssignation (& sDhcpPkt)==INADDR_NONE )
         {
            Sleep (10);
@@ -1635,14 +1686,14 @@ BOOL                    bUniCast;
         if (ProcessDHCPMessage ( & sDhcpPkt, & nSize, &SockTo ) )
         {
 //            BinDump ((char *)&sDhcpPkt, sizeof sDhcpPkt, "DHCP");
-		   // send reply 
-		   // -> if unicast replies, use Windows default behaviour
-		   // -> otherwise, send a broadcast on the incoming interface (which is not the default)
-		   if (bUniCast)
-				DHCPSingleSend (tThreads[TH_DHCP].skt, & SockFrom, & sDhcpPkt, nSize, bUniCast);
-		   else
-			    DHCPSendFrom (& SockTo, & SockFrom, & sDhcpPkt, nSize);
-				
+     // send reply
+     // -> if unicast replies, use Windows default behaviour
+     // -> otherwise, send a broadcast on the incoming interface (which is not the default)
+     if (bUniCast)
+   	DHCPSingleSend (tThreads[TH_DHCP].skt, & SockFrom, & sDhcpPkt, nSize, bUniCast);
+     else
+       DHCPSendFrom (& SockTo, & SockFrom, & sDhcpPkt, nSize);
+   	
         }  // ProcessDHCPMessage
 
    } // do it eternally
